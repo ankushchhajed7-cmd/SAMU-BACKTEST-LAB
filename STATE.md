@@ -1,11 +1,12 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.2.0** (branch `feature-v0.2.0`), 19 Nov 2026
+**v0.3.0** (branch `feature-v0.3.0`), 19 Nov 2026
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.3.0 | 19 Nov 2026 | Report screen: 18 stats (PF, win rate, expectancy, recovery, avg/largest win-loss, streaks, worst floating, green/red days, best/worst day), equity + drawdown % chart, mahine-wise P/L (+total), din-wise P/L (7 AM IST, month filter, TARGET/LOSS stop), baskets/trades list (50/page). Export: HTML report (self-contained, strategy JSON included), trades CSV, daily CSV. Matrix row tap → uska report. Last run reload ke baad bhi bacha rehta hai. Engine `report()` + 5 tests |
 | v0.2.0 | 19 Nov 2026 | Engine: M1 OHLC simulation, intrabar path Auto/O→L→H→C/O→H→L→C/Worst-case, CSV ya fixed spread, Supertrend (SMA/RMA ATR, closed bar), Step Basket A/B/C, daily target/loss, 07:00 IST reset. RUN screen (summary, equity, close reasons, last 30 baskets) + A/B/C × path matrix. `docs/ENGINE-RULES.md` |
 | v0.1.0 | 19 Nov 2026 | PWA shell (Gold Luxe theme), MT5 M1 CSV loader (UTF-16/UTF-8, tab/comma/semicolon, header ya bina header), Data screen (stats, mahine-wise coverage, gaps, spread, chart), Strategy screen (JSON load/upload/edit/download, validation, A/B/C preset switch), offline service worker, `strategies/step-basket.json` |
 
@@ -17,7 +18,7 @@
 | `sw.js` | Offline cache (network-first, cache fallback) |
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
-| `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 16 tests) |
+| `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 21 tests) |
 | `icons/icon-192.png`, `icons/icon-512.png` | App icons |
 
 ## Settings / conventions
@@ -44,10 +45,10 @@
 10. (v0.2.0) Nayi basket sirf naye M1 bar ke open pe khulti hai (EA bhi yahi karega)
 11. (v0.2.0) Supertrend ATR = SMA (MT5 iATR) default; `rma` option. TEST EA v0.90 kaunsa use karta hai, confirm karna hai
 12. (v0.2.0) Max DD = floating equity (bar ke low tak) pe, closed-equity peak se
+13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
 ## Pending / next
-- [ ] **v0.3.0** Report (net, DD, PF, win rate, equity, mahine/din-wise, trade list)
-- [ ] v0.4.0 Compare + export
+- [ ] **v0.4.0** Compare (2+ runs side-by-side, equity overlay)
 - [ ] v0.5.0 Strategy form editor + Parity screen (EA log vs app)
 - [ ] SAMU Universal EA v1.00.mq5
 - [ ] TEST EA v0.90 ka ATR method + same-side-grid behaviour confirm karna

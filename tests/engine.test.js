@@ -84,4 +84,16 @@ ok('Balance change = sum of trade profits', Math.abs(sum - rw.net) < 1e-6);
 { let bars=[100]; for (let p=99;p>=60;p--) bars.push(p); for (let p=61;p<=80;p++) bars.push(p);
   const r = R(bars,'B',{balance:10000}); const b=r.baskets[0];
   ok('Trail exact: profit = peak - 5', Math.abs(b.pr - (b.peakPL - 5)) < 1e-6, 'peak '+b.peakPL.toFixed(2)+' profit '+b.pr.toFixed(2)); }
+
+// 11. report: day / month sums equal net, baskets counted once
+{ const n = 3 * 1440; const bars = []; let p = 100;
+  for (let k = 0; k < n; k++) { p += Math.sin(k / 37) * 0.9 + Math.cos(k / 11) * 0.6; bars.push(p); }
+  const r = R(bars, 'B', { balance: 1000, path: 'auto' }); const rep = E.report(r);
+  const sd = rep.days.reduce((a, d) => a + d.pl, 0), sm = rep.months.reduce((a, m) => a + m.pl, 0);
+  ok('Report: sum of daily P/L = net', Math.abs(sd - r.net) < 1e-6, 'days ' + rep.days.length + ' net ' + r.net.toFixed(2));
+  ok('Report: sum of monthly P/L = net', Math.abs(sm - r.net) < 1e-6);
+  ok('Report: every basket counted in a day', rep.days.reduce((a, d) => a + d.baskets, 0) === r.baskets.length, r.baskets.length + ' baskets');
+  ok('Report: gross profit + gross loss = net', Math.abs(rep.stats.grossProfit + rep.stats.grossLoss - r.net) < 1e-6);
+  ok('Report: day dates are IST trading days (07:00 reset)', rep.days[0].date === '2026-07-01', rep.days.map(d => d.date).join(','));
+}
 console.log(fails ? fails + ' FAILED' : 'ALL PASS'); process.exit(fails ? 1 : 0);

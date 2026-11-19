@@ -109,7 +109,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.2.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.3.0</small></h1>
     </div>
     <div class="clocks">
       IST <b id="clkIst">--:--:--</b><br>
@@ -274,7 +274,7 @@ section.scr.on{display:block}
     <div class="card">
       <div class="lbl">Last 30 baskets</div>
       <div class="scroll"><table class="tbl" id="rBaskets"></table></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">Poori trade list, mahine/din-wise P/L: v0.3.0 Report mein.</div>
+      <div class="btns"><button class="btn small" id="btnToReport">Poora report →</button></div>
     </div>
   </div>
 
@@ -282,7 +282,7 @@ section.scr.on{display:block}
     <div class="card">
       <div class="lbl">Matrix: preset × path</div>
       <div class="scroll"><table class="tbl" id="mxTbl"></table></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">Faisla Worst-case row se lo: jo preset worst-case mein bhi theek ho, wahi live ke layak hai.</div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Kisi row pe tap karo → uska poora Report. Faisla Worst-case row se lo: jo preset worst-case mein bhi theek ho, wahi live ke layak hai.</div>
     </div>
   </div>
 </section>
@@ -290,10 +290,54 @@ section.scr.on{display:block}
 <!-- ================= REPORT ================= -->
 <section class="scr" id="scr-report">
   <h2 class="sec">Report</h2>
-  <div class="card soon">
-    <div class="lbl">Coming in v0.3.0</div>
-    <div class="big">Report</div>
-    <p class="muted" style="font-size:13px">Net profit · Max DD · Profit factor · Win rate · Equity curve · Mahine-wise / din-wise P/L · Trade list · Basket list</p>
+  <div id="repEmpty" class="banner info">Pehle RUN screen pe ▶ Run karo. Matrix ki kisi row pe tap karke bhi uska report khul jaata hai.</div>
+
+  <div id="repOut" class="hide">
+    <div class="card">
+      <div class="lbl" id="repTitle"></div>
+      <div class="big" id="repNet"></div>
+      <div class="muted mono" id="repMeta" style="margin-top:4px;white-space:pre-wrap"></div>
+      <div class="btns">
+        <button class="btn solid small" id="btnExpHtml">⬇ HTML report</button>
+        <button class="btn small" id="btnExpTrades">⬇ Trades CSV</button>
+        <button class="btn small" id="btnExpDaily">⬇ Daily CSV</button>
+      </div>
+    </div>
+
+    <div class="grid" id="repStats"></div>
+
+    <div class="card">
+      <div class="lbl">Equity</div>
+      <canvas id="repEq"></canvas>
+      <div class="lbl" style="margin-top:12px">Drawdown %</div>
+      <canvas id="repDd" style="height:110px"></canvas>
+      <div class="mono muted" id="repAxis" style="display:flex;justify-content:space-between;margin-top:4px"></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Mahine-wise P/L</div>
+      <div class="scroll"><table class="tbl" id="repMonths"></table></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Din-wise P/L</div>
+      <div class="field"><div><label>Mahina</label><div class="hint" id="repDaySum"></div></div><select id="repDayMonth"></select></div>
+      <div class="scroll"><table class="tbl" id="repDays"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Din = 7:00 AM IST se agle 7:00 AM IST tak. P/L = equity badlav (floating bhi shamil).</div>
+    </div>
+
+    <div class="card">
+      <div class="seg" id="repListSeg">
+        <button class="btn small on" data-v="baskets">Baskets</button>
+        <button class="btn small" data-v="trades">Trades</button>
+      </div>
+      <div class="scroll" style="margin-top:8px"><table class="tbl" id="repList"></table></div>
+      <div class="btns" style="justify-content:space-between;align-items:center">
+        <button class="btn small" id="repPrev">‹ Prev</button>
+        <span class="mono muted" id="repPage"></span>
+        <button class="btn small" id="repNext">Next ›</button>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -318,7 +362,7 @@ section.scr.on{display:block}
 </nav>
 
 <script id="engine">
-/* ===================== SAMU ENGINE v0.2.0 =====================
+/* ===================== SAMU ENGINE v0.3.0 =====================
    Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
    (Universal EA must follow the same rules for parity). */
 var SamuEngine = (function () {
@@ -587,7 +631,7 @@ var SamuEngine = (function () {
     return summarize({
       startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
       eqClose: eqClose, eqLow: eqLow, barT: barT,
-      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + (opt.fixedPts != null ? opt.fixedPts : 200) + ' pts' : 'CSV', balance: startBal, offset: off },
+      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + (opt.fixedPts != null ? opt.fixedPts : 200) + ' pts' : 'CSV', balance: startBal, offset: off, resetSec: resetSec },
       strategyName: st.name, from: T[i0], to: T[i1]
     });
   }
@@ -617,13 +661,63 @@ var SamuEngine = (function () {
     return r;
   }
 
-  return { run: run, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
+  /* ---------- report: day / month / basket stats ---------- */
+  function ymd(sec) { var d = new Date(sec * 1000); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function report(r) {
+    var off = r.opt.offset || 0, rs = r.opt.resetSec != null ? r.opt.resetSec : 7 * 3600;
+    var keyOf = function (t) { return Math.floor((t - off * 3600 + IST - rs) / 86400); };
+    var days = [], byKey = {};
+    r.days.forEach(function (d, i) {
+      var end = i + 1 < r.days.length ? r.days[i + 1].startEq : r.endBal;
+      var o = { key: d.key, date: ymd(d.key * 86400), startEq: d.startEq, endEq: end, pl: end - d.startEq,
+        pct: d.startEq ? (end - d.startEq) / d.startEq * 100 : 0, baskets: 0, wins: 0, trades: 0, stop: null };
+      days.push(o); byKey[d.key] = o;
+    });
+    r.baskets.forEach(function (b) { var o = byKey[keyOf(b.ct)]; if (o) { o.baskets++; o.trades += b.n; if (b.pr > 0) o.wins++; } });
+    r.dayStops.forEach(function (s) { var o = byKey[s.day]; if (o) o.stop = s.r; });
+
+    var months = [], mBy = {};
+    days.forEach(function (d) {
+      var k = d.date.slice(0, 7), m = mBy[k];
+      if (!m) { m = mBy[k] = { month: k, startEq: d.startEq, pl: 0, baskets: 0, wins: 0, trades: 0, days: 0, green: 0, red: 0, targetDays: 0, lossDays: 0 }; months.push(m); }
+      m.pl += d.pl; m.baskets += d.baskets; m.wins += d.wins; m.trades += d.trades; m.days++;
+      if (d.pl > 1e-9) m.green++; else if (d.pl < -1e-9) m.red++;
+      if (d.stop === 'DAY_TARGET') m.targetDays++; if (d.stop === 'DAY_LOSS') m.lossDays++;
+    });
+    months.forEach(function (m) { m.pct = m.startEq ? m.pl / m.startEq * 100 : 0; m.endEq = m.startEq + m.pl; });
+
+    var B = r.baskets, gp = 0, gl = 0, nw = 0, nl = 0, bigW = 0, bigL = 0, cw = 0, cl = 0, mcw = 0, mcl = 0, dur = 0, worstFloat = 0, tradesN = 0;
+    B.forEach(function (b) {
+      if (b.pr > 0) { gp += b.pr; nw++; if (b.pr > bigW) bigW = b.pr; cw++; cl = 0; if (cw > mcw) mcw = cw; }
+      else { gl -= b.pr; nl++; if (b.pr < bigL) bigL = b.pr; cl++; cw = 0; if (cl > mcl) mcl = cl; }
+      dur += (b.ct - b.ot); if (b.minPL < worstFloat) worstFloat = b.minPL; tradesN += b.n;
+    });
+    var tw = 0, lots = 0; r.trades.forEach(function (t) { if (t.pr > 0) tw++; lots += t.lot; });
+    var green = 0, red = 0, best = null, worst = null;
+    days.forEach(function (d) { if (d.pl > 1e-9) green++; else if (d.pl < -1e-9) red++; if (!best || d.pl > best.pl) best = d; if (!worst || d.pl < worst.pl) worst = d; });
+    var bestM = null, worstM = null; months.forEach(function (m) { if (!bestM || m.pl > bestM.pl) bestM = m; if (!worstM || m.pl < worstM.pl) worstM = m; });
+    return {
+      days: days, months: months,
+      stats: {
+        grossProfit: gp, grossLoss: -gl, wins: nw, losses: nl,
+        avgWin: nw ? gp / nw : 0, avgLoss: nl ? -gl / nl : 0, largestWin: bigW, largestLoss: bigL,
+        maxConsWins: mcw, maxConsLosses: mcl, avgBasketMin: B.length ? dur / B.length / 60 : 0,
+        avgTradesPerBasket: B.length ? tradesN / B.length : 0, worstFloating: worstFloat,
+        expectancy: B.length ? r.net / B.length : 0, recovery: r.maxDD > 0 ? r.net / r.maxDD : 0,
+        tradeWinRate: r.trades.length ? tw / r.trades.length * 100 : 0, totalLots: lots,
+        greenDays: green, redDays: red, bestDay: best, worstDay: worst, bestMonth: bestM, worstMonth: worstM,
+        avgDay: days.length ? r.net / days.length : 0
+      }
+    };
+  }
+
+  return { run: run, report: report, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.2.0';
+const APP_VERSION = 'v0.3.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -686,6 +780,7 @@ $('nav').addEventListener('click', e => {
   document.querySelectorAll('section.scr').forEach(s => s.classList.toggle('on', s.id === 'scr-' + b.dataset.scr));
   lsSet('samu.tab', b.dataset.scr);
   if (b.dataset.scr === 'data' && S.ds) drawChart();
+  if (b.dataset.scr === 'report') setTimeout(drawRepCharts, 0);
   if (b.dataset.scr === 'run') { renderRunReady(); if (S.lastRun) setTimeout(() => drawEquity(S.lastRun), 0); }
   window.scrollTo(0, 0);
 });
@@ -1215,6 +1310,7 @@ function renderRunReady() {
   $('rSpRow').classList.toggle('hide', $('rSpMode').value !== 'fixed');
   $('btnRun').disabled = $('btnMatrix').disabled = !r.ok;
 }
+$('btnToReport').onclick = () => goTab('report');
 $('rSpMode').onchange = () => { $('rSpRow').classList.toggle('hide', $('rSpMode').value !== 'fixed'); saveRunSettings(); };
 RUN_KEYS.forEach(k => $(k).addEventListener('change', saveRunSettings));
 function saveRunSettings() { const o = {}; RUN_KEYS.forEach(k => o[k] = $(k).value); lsSet('samu.run', JSON.stringify(o)); }
@@ -1244,9 +1340,9 @@ $('btnRun').onclick = async () => {
   try {
     const t0 = performance.now();
     const r = SamuEngine.run(S.ds, S.strategy, o);
-    r.ms = performance.now() - t0;
-    S.lastRun = r;
+    r.ms = performance.now() - t0; r.ranAt = Date.now(); r.strategy = JSON.parse(JSON.stringify(S.strategy));
     runProgress(null, null);
+    setReport(r);
     renderRun(r);
   } catch (e) { showRunError(e); }
 };
@@ -1260,18 +1356,20 @@ $('btnMatrix').onclick = async () => {
     for (const p of presets) for (const path of paths) {
       runProgress('Matrix ' + (k + 1) + '/' + tot + ': ' + p + ' · ' + PATH_NAME[path], k / tot); await tick();
       const r = SamuEngine.run(S.ds, S.strategy, runOpts({ preset: p, path }));
+      r.ranAt = Date.now(); r.strategy = JSON.parse(JSON.stringify(S.strategy));
       rows.push({ p, path, r }); k++;
     }
   } catch (e) { return showRunError(e); }
   runProgress(null, null);
   S.lastMatrix = rows;
   let h = '<tr><th>PRESET</th><th>PATH</th><th>NET</th><th>MAX DD</th><th>PF</th><th>WIN%</th><th>BASKETS</th></tr>';
-  rows.forEach(x => {
+  rows.forEach((x, i) => {
     const r = x.r, w = x.path === 'worst';
-    h += '<tr' + (w ? ' style="background:#140f04"' : '') + '><td>' + x.p + '</td><td>' + (w ? '<b class="warnc">Worst</b>' : PATH_NAME[x.path]) + '</td><td class="' + (r.net >= 0 ? 'good' : 'badc') + '">' + money(r.net) +
+    h += '<tr data-i="' + i + '" style="cursor:pointer' + (w ? ';background:#140f04' : '') + '"><td>' + x.p + '</td><td>' + (w ? '<b class="warnc">Worst</b>' : PATH_NAME[x.path]) + '</td><td class="' + (r.net >= 0 ? 'good' : 'badc') + '">' + money(r.net) +
       '</td><td>' + fmtNum(r.maxDDPct, 1) + '%</td><td>' + (isFinite(r.pf) ? fmtNum(r.pf, 2) : '∞') + '</td><td>' + fmtNum(r.winRate, 0) + '</td><td>' + fmtInt(r.baskets.length) + '</td></tr>';
   });
   $('mxTbl').innerHTML = h;
+  $('mxTbl').onclick = e => { const tr = e.target.closest('tr[data-i]'); if (!tr) return; setReport(S.lastMatrix[+tr.dataset.i].r); goTab('report'); };
   $('mxOut').classList.remove('hide');
   $('mxOut').scrollIntoView({ behavior: 'smooth' });
 };
@@ -1329,7 +1427,223 @@ function drawEquity(r) {
   g.fillText(money(mx), 4, 12); g.fillText(money(mn), 4, H - 3);
   $('eqAxis').innerHTML = '<span>' + fmtDate(r.from) + '</span><span class="muted">gold = equity · laal = bar ka low</span><span>' + fmtDate(r.to) + '</span>';
 }
-window.addEventListener('resize', () => { if (S.lastRun) setTimeout(() => drawEquity(S.lastRun), 160); });
+window.addEventListener('resize', () => { if (S.lastRun) setTimeout(() => { drawEquity(S.lastRun); drawRepCharts(); }, 160); });
+
+/* ===================== REPORT ===================== */
+const goTab = name => { const b = document.querySelector('#nav button[data-scr="' + name + '"]'); if (b) b.click(); };
+const signCls = v => v > 1e-9 ? 'good' : v < -1e-9 ? 'badc' : 'muted';
+const pctS = v => (v >= 0 ? '+' : '') + fmtNum(v, 2) + '%';
+const durS = m => m < 60 ? Math.round(m) + 'm' : m < 1440 ? (m / 60).toFixed(1) + 'h' : (m / 1440).toFixed(1) + 'd';
+const RP = { list: 'baskets', page: 0, per: 50, month: '' };
+
+function setReport(r, persist) {
+  S.lastRun = r; S.rep = SamuEngine.report(r); RP.page = 0; RP.month = '';
+  renderReport();
+  if (persist !== false) { try { DB.put('lastRun', r); } catch (e) {} }
+}
+
+function repStatsList(r, rep, st) {
+  const s = rep.stats, d = st && st.daily ? st.daily : { target_pct: '?', loss_pct: '?' };
+  return [
+    ['Net profit', money(r.net), pctS(r.netPct) + ' of start'],
+    ['Final balance', money(r.endBal), 'start ' + money(r.startBal)],
+    ['Max DD', fmtNum(r.maxDDPct, 1) + '%', money(r.maxDD) + ' · floating incl.'],
+    ['Profit factor', isFinite(r.pf) ? fmtNum(r.pf, 2) : '∞', 'gross ' + money(s.grossProfit) + ' / ' + money(s.grossLoss)],
+    ['Win rate', fmtNum(r.winRate, 1) + '%', s.wins + ' W / ' + s.losses + ' L baskets'],
+    ['Trade win rate', fmtNum(s.tradeWinRate, 1) + '%', fmtInt(r.trades.length) + ' trades · ' + fmtNum(s.totalLots, 2) + ' lots'],
+    ['Expectancy', money(s.expectancy), 'per basket'],
+    ['Recovery factor', fmtNum(s.recovery, 2), 'net / max DD'],
+    ['Avg win', money(s.avgWin), 'largest ' + money(s.largestWin)],
+    ['Avg loss', money(s.avgLoss), 'largest ' + money(s.largestLoss)],
+    ['Max cons. losses', s.maxConsLosses, 'wins ' + s.maxConsWins + ' in a row'],
+    ['Worst floating', money(s.worstFloating), 'ek basket ka sabse bura P/L'],
+    ['Basket', fmtNum(s.avgTradesPerBasket, 1) + ' trades', 'avg ' + durS(s.avgBasketMin) + ' · max ' + r.maxTradesInBasket],
+    ['Days', s.greenDays + ' / ' + s.redDays, 'green / red · avg ' + money(s.avgDay)],
+    ['Best day', s.bestDay ? money(s.bestDay.pl) : '—', s.bestDay ? s.bestDay.date : ''],
+    ['Worst day', s.worstDay ? money(s.worstDay.pl) : '—', s.worstDay ? s.worstDay.date : ''],
+    ['Target days', fmtInt(r.dayTarget), 'daily +' + d.target_pct + '%'],
+    ['Loss days', fmtInt(r.dayLoss), 'daily −' + d.loss_pct + '%']
+  ];
+}
+
+function renderReport() {
+  const r = S.lastRun, rep = S.rep, has = !!(r && rep);
+  $('repOut').classList.toggle('hide', !has); $('repEmpty').classList.toggle('hide', has);
+  if (!has) return;
+  const st = r.strategy || S.strategy;
+  $('repTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
+  $('repNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + pctS(r.netPct) + ')</span>';
+  $('repMeta').textContent = fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' (server)\nbalance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset + (r.ranAt ? ' · run ' + istNow(r.ranAt) + ' IST' : '');
+  $('repStats').innerHTML = repStatsList(r, rep, st).map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
+
+  let mh = '<tr><th>MONTH</th><th>P/L</th><th>%</th><th>DAYS G/R</th><th>BASKETS</th><th>WIN%</th><th>TGT</th><th>LOSS</th></tr>';
+  rep.months.forEach(m => {
+    mh += '<tr><td>' + m.month + '</td><td class="' + signCls(m.pl) + '">' + money(m.pl) + '</td><td class="' + signCls(m.pl) + '">' + pctS(m.pct) + '</td><td>' + m.green + '/' + m.red +
+      '</td><td>' + m.baskets + '</td><td>' + (m.baskets ? fmtNum(m.wins / m.baskets * 100, 0) : '—') + '</td><td>' + m.targetDays + '</td><td>' + m.lossDays + '</td></tr>';
+  });
+  const tot = rep.months.reduce((a, m) => ({ b: a.b + m.baskets, w: a.w + m.wins, g: a.g + m.green, rd: a.rd + m.red, t: a.t + m.targetDays, l: a.l + m.lossDays }), { b: 0, w: 0, g: 0, rd: 0, t: 0, l: 0 });
+  mh += '<tr style="border-top:1px solid var(--gold)"><td><b>TOTAL</b></td><td class="' + signCls(r.net) + '"><b>' + money(r.net) + '</b></td><td class="' + signCls(r.net) + '">' + pctS(r.netPct) + '</td><td>' + tot.g + '/' + tot.rd + '</td><td>' + tot.b + '</td><td>' + (tot.b ? fmtNum(tot.w / tot.b * 100, 0) : '—') + '</td><td>' + tot.t + '</td><td>' + tot.l + '</td></tr>';
+  $('repMonths').innerHTML = mh;
+
+  const sel = $('repDayMonth');
+  sel.innerHTML = '<option value="">Sab (' + rep.days.length + ' din)</option>' + rep.months.map(m => '<option value="' + m.month + '">' + m.month + ' (' + m.days + ')</option>').join('');
+  sel.value = RP.month;
+  renderDays(); renderList(); drawRepCharts();
+}
+
+function renderDays() {
+  const rep = S.rep; if (!rep) return;
+  const days = rep.days.filter(d => !RP.month || d.date.startsWith(RP.month));
+  const STOP = { DAY_TARGET: '<span class="good">TARGET</span>', DAY_LOSS: '<span class="badc">LOSS</span>' };
+  let h = '<tr><th>DAY (IST)</th><th>START EQ</th><th>P/L</th><th>%</th><th>BSK</th><th>W</th><th>STOP</th></tr>';
+  days.forEach(d => {
+    h += '<tr><td>' + d.date.slice(5) + ' ' + ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][new Date(d.date + 'T00:00:00Z').getUTCDay()] + '</td><td>' + fmtNum(d.startEq, 2) + '</td><td class="' + signCls(d.pl) + '">' + money(d.pl) +
+      '</td><td class="' + signCls(d.pl) + '">' + pctS(d.pct) + '</td><td>' + d.baskets + '</td><td>' + d.wins + '</td><td>' + (STOP[d.stop] || '') + '</td></tr>';
+  });
+  $('repDays').innerHTML = h;
+  const pl = days.reduce((a, d) => a + d.pl, 0), g = days.filter(d => d.pl > 1e-9).length, rd = days.filter(d => d.pl < -1e-9).length;
+  $('repDaySum').innerHTML = days.length + ' din · <span class="' + signCls(pl) + '">' + money(pl) + '</span> · ' + g + ' green / ' + rd + ' red';
+}
+$('repDayMonth').onchange = () => { RP.month = $('repDayMonth').value; renderDays(); };
+
+function renderList() {
+  const r = S.lastRun; if (!r) return;
+  const isB = RP.list === 'baskets', rows = isB ? r.baskets : r.trades;
+  const pages = Math.max(1, Math.ceil(rows.length / RP.per));
+  RP.page = Math.min(Math.max(0, RP.page), pages - 1);
+  const slice = rows.slice().reverse().slice(RP.page * RP.per, (RP.page + 1) * RP.per);
+  let h;
+  if (isB) {
+    h = '<tr><th>#</th><th>OPEN (IST)</th><th>CLOSE</th><th>DIR</th><th>N</th><th>WORST</th><th>P/L</th><th>REASON</th></tr>';
+    slice.forEach(b => h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + istStr(b.ct).slice(11) + '</td><td>' + (b.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + b.n +
+      '</td><td class="muted">' + money(b.minPL) + '</td><td class="' + signCls(b.pr) + '">' + money(b.pr) + '</td><td>' + (REASON_SHORT[b.r] || b.r) + '</td></tr>');
+  } else {
+    h = '<tr><th>#</th><th>BSK</th><th>OPEN (IST)</th><th>DIR</th><th>LOT</th><th>PRICE</th><th>CLOSE</th><th>PRICE</th><th>P/L</th><th>REASON</th></tr>';
+    slice.forEach(t => h += '<tr><td>' + t.id + '</td><td>' + t.b + '</td><td>' + istStr(t.ot).slice(5) + '</td><td>' + (t.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + t.lot.toFixed(2) + '</td><td>' + fmtNum(t.op, 3) +
+      '</td><td>' + istStr(t.ct).slice(11) + '</td><td>' + fmtNum(t.cp, 3) + '</td><td class="' + signCls(t.pr) + '">' + money(t.pr) + '</td><td>' + (REASON_SHORT[t.r] || t.r) + '</td></tr>');
+  }
+  if (!rows.length) h += '<tr><td colspan="10" class="muted">Kuch nahi.</td></tr>';
+  $('repList').innerHTML = h;
+  $('repPage').textContent = 'Page ' + (RP.page + 1) + ' / ' + pages + ' · ' + fmtInt(rows.length) + (isB ? ' baskets' : ' trades') + ' · naye pehle';
+  $('repPrev').disabled = RP.page === 0; $('repNext').disabled = RP.page >= pages - 1;
+}
+$('repListSeg').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  RP.list = b.dataset.v; RP.page = 0;
+  $('repListSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderList();
+};
+$('repPrev').onclick = () => { RP.page--; renderList(); };
+$('repNext').onclick = () => { RP.page++; renderList(); };
+
+function ddSeries(r) {
+  const n = r.eqClose.length, dd = new Float64Array(n); let peak = r.startBal;
+  for (let i = 0; i < n; i++) { dd[i] = peak > 0 ? (peak - r.eqLow[i]) / peak * 100 : 0; if (r.eqClose[i] > peak) peak = r.eqClose[i]; }
+  return dd;
+}
+function drawRepCharts() {
+  const r = S.lastRun; if (!r || !$('repEq').offsetWidth) return;
+  const prep = cv => { const dpr = window.devicePixelRatio || 1, W = cv.offsetWidth, H = cv.offsetHeight; cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); return { g, W, H }; };
+  // equity
+  let { g, W, H } = prep($('repEq'));
+  const n = r.eqClose.length, cols = Math.max(2, Math.floor(W)), ce = new Float64Array(cols).fill(NaN);
+  for (let i = 0; i < n; i++) ce[Math.floor(i / n * cols)] = r.eqClose[i];
+  let mn = r.startBal, mx = r.startBal; for (let x = 0; x < cols; x++) if (!isNaN(ce[x])) { if (ce[x] < mn) mn = ce[x]; if (ce[x] > mx) mx = ce[x]; }
+  const pad = 8, y = v => pad + (mx - v) / ((mx - mn) || 1) * (H - 2 * pad);
+  g.strokeStyle = '#2a2414'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(0, y(r.startBal)); g.lineTo(W, y(r.startBal)); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = '#d4af37'; g.lineWidth = 1.6; g.beginPath(); let f = true;
+  for (let x = 0; x < cols; x++) { if (isNaN(ce[x])) continue; if (f) { g.moveTo(x, y(ce[x])); f = false; } else g.lineTo(x, y(ce[x])); }
+  g.stroke(); g.fillStyle = '#8f887a'; g.font = '10px ui-monospace,monospace'; g.fillText(money(mx), 4, 12); g.fillText(money(mn), 4, H - 3);
+  // drawdown
+  ({ g, W, H } = prep($('repDd')));
+  const dd = ddSeries(r), cd = new Float64Array(cols).fill(0);
+  for (let i = 0; i < n; i++) { const x = Math.floor(i / n * cols); if (dd[i] > cd[x]) cd[x] = dd[i]; }
+  let dmx = 0; for (let x = 0; x < cols; x++) if (cd[x] > dmx) dmx = cd[x];
+  const yd = v => 4 + v / (dmx || 1) * (H - 14);
+  g.fillStyle = 'rgba(255,93,93,.45)'; g.beginPath(); g.moveTo(0, 4);
+  for (let x = 0; x < cols; x++) g.lineTo(x, yd(cd[x]));
+  g.lineTo(cols, 4); g.closePath(); g.fill();
+  g.fillStyle = '#8f887a'; g.font = '10px ui-monospace,monospace'; g.fillText('−' + fmtNum(dmx, 1) + '%', 4, H - 2);
+  $('repAxis').innerHTML = '<span>' + fmtDate(r.from) + '</span><span>' + fmtDate(r.to) + '</span>';
+}
+
+/* ---------- export ---------- */
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime }); const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const istNow = ms => fmtSec(Math.floor(ms / 1000) + IST_OFFSET_SEC);
+function fileBase(r) { return 'samu-' + slug(r.strategyName) + '-' + r.opt.preset + '-' + r.opt.path + '-' + fmtDate(r.from) + '_' + fmtDate(r.to); }
+const csvCell = v => { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const toCsv = rows => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
+
+$('btnExpTrades').onclick = () => {
+  const r = S.lastRun; if (!r) return;
+  const rows = [['id', 'basket', 'dir', 'lot', 'open_time_server', 'open_time_ist', 'open_price', 'close_time_server', 'close_time_ist', 'close_price', 'profit', 'reason']];
+  r.trades.forEach(t => rows.push([t.id, t.b, t.dir > 0 ? 'BUY' : 'SELL', t.lot, fmtSec(t.ot), istStr(t.ot), t.op.toFixed(3), fmtSec(t.ct), istStr(t.ct), t.cp.toFixed(3), t.pr.toFixed(2), t.r]));
+  download(fileBase(r) + '-trades.csv', toCsv(rows), 'text/csv');
+};
+$('btnExpDaily').onclick = () => {
+  const r = S.lastRun, rep = S.rep; if (!r) return;
+  const rows = [['trading_day_ist', 'start_equity', 'end_equity', 'pl', 'pl_pct', 'baskets', 'wins', 'trades', 'stop']];
+  rep.days.forEach(d => rows.push([d.date, d.startEq.toFixed(2), d.endEq.toFixed(2), d.pl.toFixed(2), d.pct.toFixed(3), d.baskets, d.wins, d.trades, d.stop || '']));
+  download(fileBase(r) + '-daily.csv', toCsv(rows), 'text/csv');
+};
+$('btnExpHtml').onclick = () => { const r = S.lastRun; if (!r) return; download(fileBase(r) + '.html', buildHtmlReport(r, S.rep, r.strategy || S.strategy), 'text/html'); };
+
+function svgLine(vals, W, H, color, base, fmt) {
+  fmt = fmt || money;
+  const n = vals.length, k = Math.max(1, Math.ceil(n / W)); const pts = [];
+  let mn = base != null ? base : Infinity, mx = base != null ? base : -Infinity;
+  for (let i = 0; i < n; i += k) { const v = vals[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const y = v => (6 + (mx - v) / ((mx - mn) || 1) * (H - 12)).toFixed(1);
+  for (let i = 0, j = 0; i < n; i += k, j++) pts.push((i / Math.max(1, n - 1) * W).toFixed(1) + ',' + y(vals[i]));
+  const bl = base != null ? '<line x1="0" x2="' + W + '" y1="' + y(base) + '" y2="' + y(base) + '" stroke="#3a3220" stroke-dasharray="4 4"/>' : '';
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="none" style="height:' + H + 'px;display:block">' + bl +
+    '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + pts.join(' ') + '"/></svg>' +
+    '<div class="ax"><span>' + fmt(mx) + ' max</span><span>' + fmt(mn) + ' min</span></div>';
+}
+
+function buildHtmlReport(r, rep, st) {
+  const T = (head, rows) => '<table><tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr>' + rows.join('') + '</table>';
+  const td = (v, c) => '<td' + (c ? ' class="' + c + '"' : '') + '>' + v + '</td>';
+  const cls = v => v > 1e-9 ? 'g' : v < -1e-9 ? 'r' : '';
+  const stats = repStatsList(r, rep, st).map(s => '<div class="st"><div class="l">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
+  const months = rep.months.map(m => '<tr>' + td(m.month) + td(money(m.pl), cls(m.pl)) + td(pctS(m.pct), cls(m.pl)) + td(m.green + '/' + m.red) + td(m.baskets) + td(m.baskets ? fmtNum(m.wins / m.baskets * 100, 0) : '—') + td(m.targetDays) + td(m.lossDays) + '</tr>');
+  const days = rep.days.map(d => '<tr>' + td(d.date) + td(fmtNum(d.startEq, 2)) + td(money(d.pl), cls(d.pl)) + td(pctS(d.pct), cls(d.pl)) + td(d.baskets) + td(d.wins) + td(d.stop === 'DAY_TARGET' ? 'TARGET' : d.stop === 'DAY_LOSS' ? 'LOSS' : '') + '</tr>');
+  const baskets = r.baskets.map(b => '<tr>' + td(b.id) + td(istStr(b.ot)) + td(istStr(b.ct)) + td(b.dir > 0 ? 'BUY' : 'SELL') + td(b.n) + td(money(b.minPL)) + td(money(b.pr), cls(b.pr)) + td(REASON_NAME[b.r] || b.r) + '</tr>');
+  const trades = r.trades.map(t => '<tr>' + td(t.id) + td(t.b) + td(istStr(t.ot)) + td(t.dir > 0 ? 'BUY' : 'SELL') + td(t.lot.toFixed(2)) + td(t.op.toFixed(3)) + td(istStr(t.ct)) + td(t.cp.toFixed(3)) + td(money(t.pr), cls(t.pr)) + td(REASON_SHORT[t.r] || t.r) + '</tr>');
+  const reasons = Object.entries(r.reasons).map(([k, v]) => { const pr = r.baskets.filter(b => b.r === k).reduce((a, b) => a + b.pr, 0); return '<span class="pill">' + (REASON_NAME[k] || k) + ': ' + v + ' · ' + money(pr) + '</span>'; }).join(' ');
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>SAMU Report · ' + esc(r.strategyName) + ' ' + r.opt.preset + '</title><style>' +
+    'body{margin:0;background:#000;color:#e9e4d4;font:14px system-ui,-apple-system,Roboto,sans-serif}main{max-width:960px;margin:0 auto;padding:16px}' +
+    'h1,h2{font-family:Georgia,"Noto Serif",serif;color:#d4af37;font-weight:600}h1{font-size:28px;margin:4px 0}h2{font-size:20px;margin:26px 0 8px}' +
+    '.k{font-size:10px;letter-spacing:.3em;color:#8a7330}.big{font-family:Georgia,serif;font-size:38px;color:#d4af37}.m{color:#8f887a;font-size:12px;font-family:monospace}' +
+    '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.st{background:#0b0b0b;border:1px solid #2a2414;border-radius:10px;padding:8px 10px}' +
+    '.st .l{font-size:9.5px;letter-spacing:.22em;color:#d4af37;text-transform:uppercase}.st .v{font-family:Georgia,serif;font-size:19px;color:#f3d77a}.st .n{font-size:11px;color:#8f887a}' +
+    '.box{background:#0b0b0b;border:1px solid #2a2414;border-radius:12px;padding:10px;overflow-x:auto}.ax{display:flex;justify-content:space-between;color:#8f887a;font:11px monospace}' +
+    'table{border-collapse:collapse;width:100%;font:12px ui-monospace,Menlo,monospace}th{color:#d4af37;font-size:9.5px;letter-spacing:.18em;text-align:right;padding:5px 6px;border-bottom:1px solid #2a2414;white-space:nowrap}' +
+    'td{text-align:right;padding:5px 6px;border-bottom:1px solid #161309;white-space:nowrap}th:first-child,td:first-child{text-align:left}.g{color:#4fd18b}.r{color:#ff5d5d}' +
+    '.pill{display:inline-block;border:1px solid #8a7330;border-radius:20px;padding:2px 9px;font-size:11px;color:#f3d77a;margin:2px}details summary{cursor:pointer;color:#d4af37}pre{white-space:pre-wrap;font-size:11px;color:#8f887a}' +
+    '</style></head><body><main>' +
+    '<div class="k">SAMU BACKTEST LAB · ' + APP_VERSION + '</div><h1>' + esc(r.strategyName) + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path] + '</h1>' +
+    '<div class="big">' + money(r.net) + ' <span style="font-size:18px;color:#8f887a">(' + pctS(r.netPct) + ')</span></div>' +
+    '<div class="m">' + fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' server · balance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset +
+    ' · generated ' + istNow(Date.now()) + ' IST</div>' +
+    '<p class="m">Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.</p>' +
+    '<h2>Summary</h2><div class="grid">' + stats + '</div>' +
+    '<h2>Equity</h2><div class="box">' + svgLine(r.eqClose, 900, 220, '#d4af37', r.startBal) + '</div>' +
+    '<h2>Drawdown %</h2><div class="box">' + svgLine(Array.from(ddSeries(r), v => -v), 900, 110, '#ff5d5d', 0, v => fmtNum(Math.abs(v), 1) + '%') + '</div>' +
+    '<h2>Close reasons</h2><div>' + reasons + '</div>' +
+    '<h2>Mahine-wise P/L</h2><div class="box">' + T(['MONTH', 'P/L', '%', 'DAYS G/R', 'BASKETS', 'WIN%', 'TGT', 'LOSS'], months) + '</div>' +
+    '<h2>Din-wise P/L (7:00 AM IST reset)</h2><div class="box">' + T(['DAY', 'START EQ', 'P/L', '%', 'BSK', 'W', 'STOP'], days) + '</div>' +
+    '<h2>Baskets (' + r.baskets.length + ')</h2><div class="box">' + T(['#', 'OPEN IST', 'CLOSE IST', 'DIR', 'N', 'WORST', 'P/L', 'REASON'], baskets) + '</div>' +
+    '<h2>Trades (' + r.trades.length + ')</h2><div class="box">' + T(['#', 'BSK', 'OPEN IST', 'DIR', 'LOT', 'PRICE', 'CLOSE IST', 'PRICE', 'P/L', 'REASON'], trades) + '</div>' +
+    '<h2>Strategy</h2><details><summary>JSON</summary><pre>' + esc(JSON.stringify(st, null, 2)) + '</pre></details>' +
+    '</main></body></html>';
+}
 
 /* ===================== boot ===================== */
 (async function boot() {
@@ -1348,6 +1662,7 @@ window.addEventListener('resize', () => { if (S.lastRun) setTimeout(() => drawEq
   } catch (e) { renderData(); }
 
   renderRunReady(); loadRunSettings(); renderRunReady();
+  try { const lr = await DB.get('lastRun'); if (lr && lr.eqClose) setReport(lr, false); } catch (e) {}
   const tab = lsGet('samu.tab');
   if (tab) { const b = document.querySelector('#nav button[data-scr="' + tab + '"]'); if (b) b.click(); }
 
