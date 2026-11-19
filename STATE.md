@@ -4,11 +4,12 @@
 **v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
 
 ## EA
-**SAMU Universal EA v1.01** (branch `feature-ea-v1.01`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
+**SAMU Universal EA v1.02** (branch `feature-ea-v1.02`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| EA v1.02 | 19 Nov 2026 | Dashboard theek: v1.01 laptop (150% DPI, chhoti height) pe bahut chhota + overlap tha. Ab DPI factor (dpi/96) + min scale 0.8 + compact layout (info / table jagah na ho to chhupte hain), panels / bars dikhte rang. Bada number = **EA P/L** (sirf is EA: band trades since + khuli basket), $1000 / account equity hataye (Ankush: doosre EA ka +/- bhi dikh raha tha). Base > account equity ho to warning (trade nahi rokta). Buttons upar daayein |
 | EA v1.01 | 19 Nov 2026 | Purane account pe safe: **Own P/L mode** (InpOwnMode, InpAllocBalance $1000, InpAllocFrom) — daily % + basket SL sirf is EA ke trades se; **margin guard** (InpMinMarginLevel 300%); **magic clash check** (khuli + 30 din history); dashboard pe EA equity, account equity, margin level. Ankush: VPS pe nayi account ki jagah nahi → purane $1000 account pe lagayenge |
 | EA v1.00 | 19 Nov 2026 | `ea/SAMU Universal EA v1.00.mq5`: JSON parser (MQL5\Files), same engine rules, Supertrend (SMA/RMA, closed bar), grid + lot table, presets TP/SL/trailing, TP1 (broker + virtual), daily target/loss 07:00 IST, spread/time filters, built-in strategy fallback (JSON file na ho to), restart-safe state (Global Variables), trade log CSV (app ke Trades CSV jaisa), Gold Luxe dashboard (DPI scale, PAUSE / CLOSE ALL, CONFIG ERROR banner). `tests/ea-config.test.js`, `docs/EA-SETUP.md` |
 | v0.5.1 | 19 Nov 2026 | Header mein ⟳ Refresh button: app cache saaf + latest version + reload (data safe). Refresh ke baad toast ("Update ho gaya: purana → naya"). Offline pe refresh nahi. Service worker ab browser HTTP cache bypass karta hai (`no-cache`) |
@@ -27,7 +28,7 @@
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
-| `ea/SAMU Universal EA v1.01.mq5` | Universal EA |
+| `ea/SAMU Universal EA v1.02.mq5` | Universal EA |
 | `docs/EA-SETUP.md` | EA VPS setup, tester, log |
 | `tests/ea-config.test.js` | EA ke JSON keys = strategy file (`node tests/ea-config.test.js`) |
 | `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 24 tests) |
@@ -70,9 +71,10 @@
 13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
 ## Pending / next
-- [ ] **EA v1.01 compile (VPS Helper → COPY tab) + purane $1000 account pe chart** — errors / dashboard ka screenshot bhejna
-- [ ] Compile OK ke baad `feature-ea-v1.01` ko main mein merge
-- [ ] EA v1.01 tester (1 minute OHLC) vs app (Auto path) same data pe compare
+- [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
+- [ ] **EA v1.02 compile + dashboard screenshot** → OK ho to `feature-ea-v1.02` main mein merge
+- [ ] Account equity confirm karo: agar sach mein ~$53 hai to base $1000 ke saath daily loss $50 = poora account
+- [ ] EA v1.02 tester (1 minute OHLC) vs app (Auto path) same data pe compare
 - [ ] Parity screen (EA trade log vs app), EA ka log format fix hone ke baad
 - [ ] TEST EA v0.90 ka same-side-grid behaviour confirm karna
 - [ ] Slippage option (trailing/SL pe)

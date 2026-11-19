@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
-//|                                    SAMU Universal EA v1.01.mq5   |
+//|                                    SAMU Universal EA v1.02.mq5   |
 //|  Reads a SAMU strategy JSON (schema samu-strategy/1) and trades  |
 //|  it with the same rules as SAMU Backtest Lab                     |
 //|  (docs/ENGINE-RULES.md). Gold Luxe full-screen dashboard.        |
 //+------------------------------------------------------------------+
 #property copyright   "SAMU"
-#property version     "1.01"
+#property version     "1.02"
 #property description "SAMU Universal EA: JSON strategy (MQL5\\Files), Supertrend first trade, step grid basket, lot table, basket TP/SL/trailing, daily target/loss, 07:00 IST reset."
 #property tester_file "step-basket.json"
 
@@ -22,12 +22,12 @@ input bool   InpDashboard      = true;               // Gold Luxe dashboard
 input bool   InpHidePriceChart = true;               // Hide price chart behind dashboard
 input bool   InpLogTrades      = true;               // Trade log CSV (for Parity)
 input bool   InpOwnMode        = true;               // Own P/L mode: daily % + basket SL sirf is EA ke trades se
-input double InpAllocBalance   = 1000;               // Own mode: is EA ko diya gaya balance ($)
+input double InpAllocBalance   = 1000;               // Own mode: daily % / basket SL % ka base ($)
 input datetime InpAllocFrom    = 0;                  // Own mode: realized P/L kab se gine (0 = pehli baar chalne se)
 input double InpMinMarginLevel = 300;                // Nayi trade tabhi jab margin level >= ye % (0 = off)
 
 #define EA_NAME    "SAMU Universal EA"
-#define EA_VERSION "v1.01"
+#define EA_VERSION "v1.02"
 #define PFX        "SAMUUEA_"
 #define IST_SEC    19800
 
@@ -613,6 +613,12 @@ double EaEquity()
    if(!InpOwnMode) return AccountInfoDouble(ACCOUNT_EQUITY);
    return EaBalance() + BasketPL();
   }
+//--- EA ka apna net P/L (band trades since g_since + khuli basket) - sirf is magic + symbol
+double EaNetPL()
+  {
+   if(g_realDirty) CalcRealized();
+   return g_realized + BasketPL();
+  }
 //--- margin guard: purane EAs ka margin na khaaye
 bool MarginOk(const int dir, const double lot, string &why)
   {
@@ -826,8 +832,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 //  DASHBOARD (Gold Luxe)
 //====================================================================
 #define C_BG     C'0,0,0'
-#define C_PANEL  C'11,11,11'
-#define C_LINE   C'42,36,20'
+#define C_PANEL  C'20,18,11'
+#define C_LINE   C'74,61,26'
 #define C_GOLD   C'212,175,55'
 #define C_GOLD2  C'243,215,122'
 #define C_GOLDD  C'138,115,48'
@@ -840,10 +846,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 #define F_SANS   "Segoe UI"
 #define F_MONO   "Consolas"
 
-double g_s = 1.0;
+double g_s = 1.0;      // layout scale (chart size)
+double g_k = 1.0;      // DPI factor (dpi / 96): coordinates are physical pixels, fonts MT5 khud scale karta hai
 int    g_dpi = 96;
-int    P(const double v) { return (int)MathRound(v * g_s); }
-int    FontPt(const double px) { return (int)MathMax(6, MathRound(px * g_s * 72.0 / g_dpi)); }
+int    P(const double v) { return (int)MathRound(v * g_s * g_k); }
+int    FontPt(const double px) { return (int)MathMax(7, MathRound(px * g_s * 0.75)); }
+void   Del(const string nm) { ObjectDelete(0, PFX + nm); }
 string Dot() { return " " + ShortToString(0x00B7) + " "; }
 string Spaced(const string s)
   {
@@ -934,21 +942,23 @@ void Btn(const string nm, const string txt, const int x, const int y, const int 
 void Bar(const string nm, const string title, const string valTxt, double frac, const color fill, const int x, const int y, const int w)
   {
    frac = MathMax(0, MathMin(1, frac));
-   Lbl(nm + "_t", Spaced(title), x, y, 10, C_GOLD);
-   Lbl(nm + "_v", valTxt, x + w, y, 11, C_TXT, F_MONO, true);
-   Rect(nm + "_tr", x, y + P(20), w, P(8), C'26,22,9', C'26,22,9', 1);
-   Rect(nm + "_f", x, y + P(20), (int)MathMax(1, w * frac), P(8), fill, fill, 2);
+   Lbl(nm + "_t", title, x, y, 10, C_GOLD);
+   Lbl(nm + "_v", valTxt, x + w, y, 10, C_TXT, F_MONO, true);
+   Rect(nm + "_tr", x, y + P(18), w, (int)MathMax(3, P(7)), C'48,41,20', C'48,41,20', 1);
+   Rect(nm + "_f", x, y + P(18), (int)MathMax(1, w * frac), (int)MathMax(3, P(7)), fill, fill, 2);
   }
 
 void Card(const string nm, const int x, const int y, const int w, const int h, const string title, const string val, const color vc, const string s1, const string s2)
   {
    Rect(nm, x, y, w, h, C_PANEL, C_LINE, 1);
-   Lbl(nm + "_t", Spaced(title), x + P(14), y + P(12), 10, C_GOLD);
-   Lbl(nm + "_v", val, x + P(14), y + P(32), 24, vc, F_SERIF);
-   Lbl(nm + "_1", s1, x + P(14), y + P(70), 11, C_TXT);
-   Lbl(nm + "_2", s2, x + P(14), y + P(90), 11, C_MUT);
+   Lbl(nm + "_t", Spaced(title), x + P(12), y + P(9), 10, C_GOLD);
+   Lbl(nm + "_v", val, x + P(12), y + P(25), 21, vc, F_SERIF);
+   Lbl(nm + "_1", s1, x + P(12), y + P(58), 10, C_TXT);
+   Lbl(nm + "_2", s2, x + P(12), y + P(75), 10, C_MUT);
   }
 
+// Layout logical units (96 dpi, scale 1). Rows: header 0-44, P/L 52-128, banner 136-166,
+// cards 176-272, bars 284-310, info 322-358, table 372+. Kam height pe table / info chhup jaate hain.
 void Dash()
   {
    if(!InpDashboard) return;
@@ -956,83 +966,105 @@ void Dash()
    int W = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS), H = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
    if(W < 50 || H < 50) return;
    g_dpi = (int)TerminalInfoInteger(TERMINAL_SCREEN_DPI); if(g_dpi <= 0) g_dpi = 96;
-   g_s = MathMax(0.55, MathMin(3.0, MathMin(W / 1100.0, H / 780.0)));
-   int M = P(28), IW = W - 2 * M;
+   g_k = g_dpi / 96.0;
+   double Wl = W / g_k, Hl = H / g_k;
+   g_s = MathMax(0.8, MathMin(2.2, MathMin(Wl / 1000.0, Hl / 420.0)));
+   double LW = Wl / g_s, LH = Hl / g_s;            // logical canvas at this scale
+   double M = 18, IW = LW - 2 * M;
+   bool showInfo = LH >= 362, showTable = LH >= 400;
 
    Rect("bg", 0, 0, W, H, C_BG, C_BG, 0);
    datetime srv = NowServer();
    string up = ShortToString(0x25B2), dn = ShortToString(0x25BC);
-
-   // header
-   Lbl("brand", Spaced("SAMU UNIVERSAL EA"), M, P(18), 11, C_GOLDD);
-   Lbl("sub", EA_VERSION + Dot() + g_name + " " + g_ver + " (" + (g_cfgSource == "file" ? InpStrategyFile : "built-in") + ")" + Dot() + "Preset " + g_preset + Dot() + _Symbol + Dot() + "Magic " + (string)InpMagic, M, P(38), 12, C_MUT);
-   Lbl("ist", "IST  " + TimeToString(ToIst(srv), TIME_SECONDS), W - M, P(16), 14, C_GOLD2, F_MONO, true);
-   Lbl("srv", "SERVER  " + TimeToString(srv, TIME_SECONDS), W - M, P(38), 12, C_MUT, F_MONO, true);
-
-   // equity
-   double eq = g_ready ? EaEquity() : AccountInfoDouble(ACCOUNT_EQUITY), bal = g_ready ? EaBalance() : AccountInfoDouble(ACCOUNT_BALANCE);
    int n = g_ready ? CountPos() : 0;
    double pl = g_ready ? BasketPL() : 0;
-   Lbl("eqT", Spaced(InpOwnMode ? "EQUITY  (EA)" : "EQUITY"), M, P(72), 10, C_GOLD);
-   Lbl("eq", Money(eq), M, P(86), 50, C_GOLD, F_SERIF);
+   double net = g_ready ? EaNetPL() : 0;
+   double eaEq = g_ready ? EaEquity() : 0;
+
+   // header
+   Lbl("brand", Spaced("SAMU UNIVERSAL EA") + "   " + EA_VERSION, P(M), P(10), 11, C_GOLD);
+   Lbl("sub", g_name + " " + g_ver + " (" + (g_cfgSource == "file" ? InpStrategyFile : "built-in") + ")" + Dot() + "Preset " + g_preset + Dot() + _Symbol + Dot() + "Magic " + (string)InpMagic, P(M), P(28), 10, C_MUT);
+   Lbl("ist", "IST  " + TimeToString(ToIst(srv), TIME_SECONDS), P(M + IW), P(9), 13, C_GOLD2, F_MONO, true);
+   Lbl("srv", "SERVER  " + TimeToString(srv, TIME_SECONDS), P(M + IW), P(28), 10, C_MUT, F_MONO, true);
+
+   // EA P/L (sirf is EA ke trades)
+   Lbl("eqT", Spaced("EA P/L"), P(M), P(52), 10, C_GOLD);
+   Lbl("eq", (net >= 0 ? "+" : "") + Money(net), P(M), P(64), 38, net >= 0 ? C_GOLD : C_BAD, F_SERIF);
    double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-   Lbl("eqS", (InpOwnMode ? "EA balance " : "Balance ") + Money(bal) + "     Floating " + Money(pl) +
-       (InpOwnMode ? "     Account equity " + Money(AccountInfoDouble(ACCOUNT_EQUITY)) : "") +
-       "     Margin " + (ml > 0 ? DoubleToString(ml, 0) + "%" : "-"), M, P(152), 12, C_MUT);
+   Lbl("eqS", "Band trades " + Money(g_realized) + "     Khuli basket " + Money(pl) + "     Since " + TimeToString(ToIst(g_since), TIME_DATE) +
+       "     Margin " + (ml > 0 ? DoubleToString(ml, 0) + "%" : "-"), P(M), P(112), 10, C_MUT);
+   Del("eqA");
+
+   // buttons (top right, P/L row)
+   int bw = P(120), bh = P(32);
+   Btn("btnClose", "CLOSE ALL", P(M + IW) - bw, P(66), bw, bh, C'48,10,10', C_BAD);
+   Btn("btnPause", g_paused ? "RESUME" : "PAUSE", P(M + IW) - 2 * bw - P(10), P(66), bw, bh, g_paused ? C_GOLD : C_PANEL, g_paused ? C_BG : C_GOLD);
 
    // alert banner
-   string al; color ac = C_TXT, ab = C'14,12,6';
+   string al; color ac = C_TXT, ab = C'18,15,7';
    int sp = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(!g_ready) { al = "CONFIG ERROR: " + g_cfgErr; ac = C_BAD; ab = C'26,7,7'; }
-   else if(g_lastErr != "" && TimeCurrent() - g_lastErrT < 60) { al = g_lastErr; ac = C_BAD; ab = C'26,7,7'; }
-   else if(g_dayStopped && g_dayStopReason == "DAY_TARGET") { al = "DAILY TARGET HIT  -  07:00 IST tak nayi trade band"; ac = C_OK; ab = C'7,22,15'; }
-   else if(g_dayStopped) { al = "DAILY LOSS LIMIT HIT  -  07:00 IST tak trading band"; ac = C_BAD; ab = C'26,7,7'; }
-   else if(g_paused) { al = "PAUSED  -  nayi trade band, khuli basket ke TP/SL chal rahe hain"; ac = C_WARN; ab = C'26,18,6'; }
-   else if(g_maxSpread > 0 && sp > g_maxSpread) { al = StringFormat("Spread high: %d pts (max %d)  -  nayi basket ruki", sp, g_maxSpread); ac = C_WARN; ab = C'26,18,6'; }
-   else if(g_warnMsg != "") { al = g_warnMsg; ac = C_WARN; ab = C'26,18,6'; }
+   double accEq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(!g_ready) { al = "CONFIG ERROR: " + g_cfgErr; ac = C_BAD; ab = C'34,8,8'; }
+   else if(g_lastErr != "" && TimeCurrent() - g_lastErrT < 60) { al = g_lastErr; ac = C_BAD; ab = C'34,8,8'; }
+   else if(g_dayStopped && g_dayStopReason == "DAY_TARGET") { al = "DAILY TARGET HIT  -  07:00 IST tak nayi trade band"; ac = C_OK; ab = C'8,30,20'; }
+   else if(g_dayStopped) { al = "DAILY LOSS LIMIT HIT  -  07:00 IST tak trading band"; ac = C_BAD; ab = C'34,8,8'; }
+   else if(g_paused) { al = "PAUSED  -  nayi trade band, khuli basket ke TP/SL chal rahe hain"; ac = C_WARN; ab = C'34,24,6'; }
+   else if(InpOwnMode && InpAllocBalance > accEq) { al = StringFormat("DHYAN: base $%.0f > account equity $%.2f  -  daily loss / SL account se bade ho sakte hain", InpAllocBalance, accEq); ac = C_WARN; ab = C'34,24,6'; }
+   else if(g_maxSpread > 0 && sp > g_maxSpread) { al = StringFormat("Spread high: %d pts (max %d)  -  nayi basket ruki", sp, g_maxSpread); ac = C_WARN; ab = C'34,24,6'; }
+   else if(g_warnMsg != "") { al = g_warnMsg; ac = C_WARN; ab = C'34,24,6'; }
    else if(n == 0 && g_sig == 0) { al = "Supertrend signal ka wait (warmup)"; ac = C_MUT; }
    else if(n == 0) { al = "READY  -  naye M1 bar pe " + (g_sig == 1 ? "BUY" : "SELL") + " basket khulegi"; ac = C_GOLD2; }
    else { al = StringFormat("Basket #%I64d chal rahi hai  -  %d / %d trades", g_basketId, n, g_maxT); ac = C_GOLD2; }
-   Rect("al", M, P(182), IW, P(36), ab, ac, 1);
-   Lbl("alT", al, M + P(14), P(190), 13, ac);
+   Rect("al", P(M), P(136), P(IW), P(30), ab, ac, 1);
+   Lbl("alT", al, P(M + 12), P(143), 11, ac);
 
    // 4 cards
-   int cy = P(232), gap = P(10), cw = (IW - 3 * gap) / 4, ch = P(118);
+   double gap = 10, cw = (IW - 3 * gap) / 4.0;
    string tv = (g_sig == 1) ? up + " BUY" : (g_sig == -1) ? dn + " SELL" : "-";
    color tc = (g_sig == 1) ? C_OK : (g_sig == -1) ? C_BAD : C_MUT;
-   Card("cT", M, cy, cw, ch, "TREND", tv, tc, "Supertrend " + g_tf + " (" + (string)g_atrP + ", x" + DoubleToString(g_mult, 1) + ")", g_closedBar ? "closed bar" + Dot() + (g_atrRma ? "RMA" : "SMA") : "live bar");
-   double slAmt = g_slOn ? g_slPct / 100.0 * (n > 0 ? g_bStartBal : bal) : 0;
+   Card("cT", P(M), P(176), P(cw), P(96), "TREND", tv, tc, "Supertrend " + g_tf + " (" + (string)g_atrP + ", x" + DoubleToString(g_mult, 1) + ")", g_closedBar ? "closed bar" + Dot() + (g_atrRma ? "RMA" : "SMA") : "live bar");
+   double base = n > 0 ? g_bStartBal : EaBalance();
+   double slAmt = g_slOn ? g_slPct / 100.0 * base : 0;
    string pk = (n > 0 && g_peak > -1e17) ? "Peak " + Money(g_peak) : "Peak -";
-   Card("cB", M + (cw + gap), cy, cw, ch, "BASKET", StringFormat("%d / %d", n, g_maxT), C_GOLD2, "P/L " + Money(pl), pk + (g_slOn ? Dot() + "SL " + Money(-slAmt) : ""));
-   double today = eq - g_dayStartEq, todayPct = g_dayStartEq > 0 ? today / g_dayStartEq * 100 : 0;
-   Card("cD", M + 2 * (cw + gap), cy, cw, ch, "TODAY", Money(today), today >= 0 ? C_OK : C_BAD, StringFormat("%+.2f%%", todayPct), "Start " + Money(g_dayStartEq));
+   Card("cB", P(M + cw + gap), P(176), P(cw), P(96), "BASKET", StringFormat("%d / %d", n, g_maxT), C_GOLD2, "P/L " + Money(pl), pk + (g_slOn ? Dot() + "SL " + Money(-slAmt) : ""));
+   double today = eaEq - g_dayStartEq;
+   Card("cD", P(M + 2 * (cw + gap)), P(176), P(cw), P(96), "TODAY", (today >= 0 ? "+" : "") + Money(today), today >= 0 ? C_OK : C_BAD,
+        StringFormat("%+.2f%% of $%.0f", g_dayStartEq > 0 ? today / g_dayStartEq * 100 : 0, InpOwnMode ? InpAllocBalance : g_dayStartEq), "Reset 07:00 IST");
    string nb = "-", ns = "-";
    if(n > 0) { double mx, mn; EntryRange(mx, mn); nb = DoubleToString(mx + g_step, _Digits); ns = DoubleToString(mn - g_step, _Digits); }
-   Card("cC", M + 3 * (cw + gap), cy, cw, ch, "CYCLE", "#" + (string)g_basketId, C_GOLD2, "Next BUY >= " + nb, "Next SELL <= " + ns);
+   Card("cC", P(M + 3 * (cw + gap)), P(176), P(cw), P(96), "CYCLE", "#" + (string)g_basketId, C_GOLD2, "Next BUY >= " + nb, "Next SELL <= " + ns);
 
    // progress bars
-   int by = cy + ch + P(22), bw = (IW - 2 * gap) / 3;
+   double bg2 = 26, bwl = (IW - 2 * bg2) / 3.0;
    double tgtAmt = g_dayStartEq * g_dTgt / 100.0, lossAmt = g_dayStartEq * g_dLoss / 100.0;
-   Bar("pT", "TARGET", StringFormat("%s / %s", Money(MathMax(0, today)), Money(tgtAmt)), tgtAmt > 0 ? today / tgtAmt : 0, C_GOLD, M, by, bw);
-   Bar("pD", "DD OF LIMIT", StringFormat("%s / %s", Money(MathMax(0, -today)), Money(lossAmt)), lossAmt > 0 ? -today / lossAmt : 0, C_BAD, M + bw + gap, by, bw);
-   Bar("pS", "BASKET SL", g_slOn ? StringFormat("%s / %s", Money(MathMax(0, -pl)), Money(slAmt)) : "off", slAmt > 0 ? -pl / slAmt : 0, C_WARN, M + 2 * (bw + gap), by, bw);
+   Bar("pT", "TARGET", StringFormat("%s / %s", Money(MathMax(0, today)), Money(tgtAmt)), tgtAmt > 0 ? today / tgtAmt : 0, C_GOLD, P(M), P(284), P(bwl));
+   Bar("pD", "DD OF LIMIT", StringFormat("%s / %s", Money(MathMax(0, -today)), Money(lossAmt)), lossAmt > 0 ? -today / lossAmt : 0, C_BAD, P(M + bwl + bg2), P(284), P(bwl));
+   Bar("pS", "BASKET SL", g_slOn ? StringFormat("%s / %s", Money(MathMax(0, -pl)), Money(slAmt)) : "off", slAmt > 0 ? -pl / slAmt : 0, C_WARN, P(M + 2 * (bwl + bg2)), P(284), P(bwl));
 
-   // info line
-   string lots = "";
-   for(int i = 0; i < ArraySize(g_lotVal); i++) lots += (i ? "/" : "") + DoubleToString(g_lotVal[i], 2);
-   string info = "Step $" + DoubleToString(g_step, 2) + Dot() + "Lots " + lots + Dot() + "TP1 " + (g_tp1On ? "$" + DoubleToString(g_tp1, 2) : "off") +
-                 Dot() + "Basket TP " + (g_tpOn ? Money(g_tpUsd) : "off") + Dot() + "SL " + (g_slOn ? DoubleToString(g_slPct, 2) + "%" : "off") +
-                 Dot() + "Trail " + (g_trailOn ? DoubleToString(g_trStart, 0) + "/" + DoubleToString(g_trDrop, 0) : "off") +
-                 Dot() + "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp + Dot() + (InpOwnMode ? "Own P/L " + Money(InpAllocBalance) : "Account P/L") + (InpMinMarginLevel > 0 ? Dot() + "Margin >= " + DoubleToString(InpMinMarginLevel, 0) + "%" : "");
-   Lbl("info", info, M, by + P(44), 11, C_MUT);
+   // info (2 lines)
+   if(showInfo)
+     {
+      string lots = "";
+      for(int i = 0; i < ArraySize(g_lotVal); i++) lots += (i ? "/" : "") + DoubleToString(g_lotVal[i], 2);
+      Lbl("info", "Step $" + DoubleToString(g_step, 2) + Dot() + "Lots " + lots + Dot() + "TP1 " + (g_tp1On ? "$" + DoubleToString(g_tp1, 2) : "off") +
+          Dot() + "Basket TP " + (g_tpOn ? Money(g_tpUsd) : "off") + Dot() + "SL " + (g_slOn ? DoubleToString(g_slPct, 2) + "%" : "off") +
+          Dot() + "Trail " + (g_trailOn ? DoubleToString(g_trStart, 0) + "/" + DoubleToString(g_trDrop, 0) : "off"), P(M), P(322), 10, C_MUT);
+      Lbl("info2", "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp + " pts" +
+          Dot() + (InpOwnMode ? "Base $" + DoubleToString(InpAllocBalance, 0) + " (sirf % ke liye)" : "Account P/L mode") +
+          (InpMinMarginLevel > 0 ? Dot() + "Margin guard " + DoubleToString(InpMinMarginLevel, 0) + "%" : ""), P(M), P(340), 10, C_MUT);
+     }
+   else { Del("info"); Del("info2"); }
 
    // trade table
-   int ty = by + P(74), rh = P(22);
-   int cx[6]; cx[0] = M; cx[1] = M + P(60); cx[2] = M + P(150); cx[3] = M + P(240); cx[4] = M + P(380); cx[5] = M + IW;
+   double cx[6]; cx[0] = M; cx[1] = M + 44; cx[2] = M + 120; cx[3] = M + 196; cx[4] = M + 320; cx[5] = M + IW;
    string hd[6] = {"#", "TYPE", "LOT", "OPEN", "TIME (IST)", "P/L"};
-   for(int c = 0; c < 6; c++) Lbl("th" + (string)c, Spaced(hd[c]), cx[c], ty, 9, C_GOLD, F_SANS, c == 5);
-   Rect("thl", M, ty + P(18), IW, 1, C_LINE, C_LINE, 1);
-   int maxRows = (int)MathMax(0, MathMin(12, (H - P(70) - (ty + P(24))) / rh));
+   int maxRows = showTable ? (int)MathMax(0, MathMin(12, MathFloor((LH - 396) / 19.0))) : 0;
+   if(showTable)
+     {
+      for(int c = 0; c < 6; c++) Lbl("th" + (string)c, hd[c], P(cx[c]), P(372), 9, C_GOLD, F_SANS, c == 5);
+      Rect("thl", P(M), P(388), P(IW), 1, C_LINE, C_LINE, 1);
+     }
+   else { for(int c = 0; c < 6; c++) Del("th" + (string)c); Del("thl"); }
    int row = 0;
    for(int i = 0; i < PositionsTotal() && row < maxRows; i++)
      {
@@ -1040,23 +1072,19 @@ void Dash()
       if(t == 0 || !IsMine()) continue;
       bool buy = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY;
       double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-      int y = ty + P(24) + row * rh;
-      Lbl("r" + (string)row + "_0", (string)(row + 1), cx[0], y, 11, C_MUT, F_MONO);
-      Lbl("r" + (string)row + "_1", buy ? "BUY" : "SELL", cx[1], y, 11, buy ? C_OK : C_BAD, F_MONO);
-      Lbl("r" + (string)row + "_2", DoubleToString(PositionGetDouble(POSITION_VOLUME), 2), cx[2], y, 11, C_TXT, F_MONO);
-      Lbl("r" + (string)row + "_3", DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), _Digits), cx[3], y, 11, C_TXT, F_MONO);
-      Lbl("r" + (string)row + "_4", TimeToString(ToIst((datetime)PositionGetInteger(POSITION_TIME)), TIME_MINUTES), cx[4], y, 11, C_MUT, F_MONO);
-      Lbl("r" + (string)row + "_5", Money(p), cx[5], y, 11, p >= 0 ? C_OK : C_BAD, F_MONO, true);
+      double y = 394 + row * 19;
+      Lbl("r" + (string)row + "_0", (string)(row + 1), P(cx[0]), P(y), 10, C_MUT, F_MONO);
+      Lbl("r" + (string)row + "_1", buy ? "BUY" : "SELL", P(cx[1]), P(y), 10, buy ? C_OK : C_BAD, F_MONO);
+      Lbl("r" + (string)row + "_2", DoubleToString(PositionGetDouble(POSITION_VOLUME), 2), P(cx[2]), P(y), 10, C_TXT, F_MONO);
+      Lbl("r" + (string)row + "_3", DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), _Digits), P(cx[3]), P(y), 10, C_TXT, F_MONO);
+      Lbl("r" + (string)row + "_4", TimeToString(ToIst((datetime)PositionGetInteger(POSITION_TIME)), TIME_MINUTES), P(cx[4]), P(y), 10, C_MUT, F_MONO);
+      Lbl("r" + (string)row + "_5", Money(p), P(cx[5]), P(y), 10, p >= 0 ? C_OK : C_BAD, F_MONO, true);
       row++;
      }
    for(int r = row; r < 12; r++)
-      for(int c = 0; c < 6; c++) ObjectDelete(0, PFX + "r" + (string)r + "_" + (string)c);
-   if(row == 0) Lbl("empty", "Koi khuli trade nahi", M, ty + P(26), 11, C_MUT); else ObjectDelete(0, PFX + "empty");
-
-   // buttons
-   int bh = P(40), bw2 = P(170);
-   Btn("btnPause", g_paused ? "RESUME" : "PAUSE", W - M - 2 * bw2 - gap, H - M - bh, bw2, bh, g_paused ? C_GOLD : C_PANEL, g_paused ? C_BG : C_GOLD);
-   Btn("btnClose", "CLOSE ALL", W - M - bw2, H - M - bh, bw2, bh, C'40,8,8', C_BAD);
+      for(int c = 0; c < 6; c++) Del("r" + (string)r + "_" + (string)c);
+   if(showTable && row == 0) Lbl("empty", "Koi khuli trade nahi", P(M), P(396), 10, C_MUT); else Del("empty");
+   if(showTable && n > row && row > 0) Lbl("more", StringFormat("+%d aur (chart ki height badhao)", n - row), P(M + IW), P(396 + row * 19), 9, C_MUT, F_SANS, true); else Del("more");
    ChartRedraw(0);
   }
 
