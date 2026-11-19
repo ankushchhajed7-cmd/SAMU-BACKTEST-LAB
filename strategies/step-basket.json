@@ -3,73 +3,109 @@
   "name": "Step Basket",
   "version": "1.0.0",
   "notes": "Supertrend sirf pehle trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.",
-
   "symbol": "XAUUSDm",
   "contract_size": 100,
   "point": 0.001,
   "server_gmt_offset_hours": 0,
-
   "entry": {
     "type": "supertrend",
     "tf": "M15",
     "atr_period": 10,
-    "multiplier": 3.0,
+    "multiplier": 3,
     "atr_method": "sma",
     "use_closed_bar": true,
     "warmup_bars": 50,
     "open_on": "new_m1_bar",
     "role": "first_trade_direction"
   },
-
   "first_trade": {
-    "tp_price": 5.0,
+    "tp_price": 5,
     "remove_tp_on_second_trade": true,
     "grid_same_side_while_tp": false
   },
-
   "grid": {
-    "step_price": 5.0,
+    "step_price": 5,
     "sell_below_lowest": true,
     "buy_above_highest": true,
     "max_trades": 12,
     "after_max": "wait_tp_sl"
   },
-
   "lots": [
-    { "from": 1,  "to": 3,  "lot": 0.01 },
-    { "from": 4,  "to": 6,  "lot": 0.02 },
-    { "from": 7,  "to": 9,  "lot": 0.03 },
-    { "from": 10, "to": 12, "lot": 0.04 }
+    {
+      "from": 1,
+      "to": 3,
+      "lot": 0.01
+    },
+    {
+      "from": 4,
+      "to": 6,
+      "lot": 0.02
+    },
+    {
+      "from": 7,
+      "to": 9,
+      "lot": 0.03
+    },
+    {
+      "from": 10,
+      "to": 12,
+      "lot": 0.04
+    }
   ],
-
   "basket": {
     "preset": "B",
     "sl_base": "balance_at_basket_start",
     "presets": {
-      "A": { "tp_usd": 10,   "sl_pct_balance": null, "trail": null },
-      "B": { "tp_usd": null, "sl_pct_balance": 1.0,  "trail": { "start_usd": 10, "drop_usd": 5 } },
-      "C": { "tp_usd": 10,   "sl_pct_balance": 1.0,  "trail": null }
+      "A": {
+        "tp_usd": 10,
+        "sl_pct_balance": null,
+        "trail": null
+      },
+      "B": {
+        "tp_usd": null,
+        "sl_pct_balance": 1,
+        "trail": {
+          "start_usd": 10,
+          "drop_usd": 5
+        }
+      },
+      "C": {
+        "tp_usd": 10,
+        "sl_pct_balance": 1,
+        "trail": null
+      }
     }
   },
-
   "daily": {
-    "target_pct": 1.0,
-    "loss_pct": 5.0,
+    "target_pct": 1,
+    "loss_pct": 5,
     "base": "day_start_equity",
     "reset_time": "07:00",
     "tz": "IST",
     "on_hit": "close_all_stop_day",
     "open_basket_at_reset": "keep"
   },
-
   "costs": {
     "commission_per_lot": 0,
     "swap": false
   },
-
   "filters": {
     "max_spread_points": 0,
-    "time": { "enabled": false, "from": "00:00", "to": "23:59", "tz": "IST" },
-    "news": { "enabled": false, "before_min": 30, "after_min": 30 }
+    "time": {
+      "enabled": false,
+      "from": "00:00",
+      "to": "23:59",
+      "tz": "IST"
+    },
+    "news": {
+      "enabled": false,
+      "before_min": 30,
+      "after_min": 30
+    },
+    "friday_stop": {
+      "enabled": false,
+      "time": "14:00",
+      "tz": "IST"
+    }
   }
 }

@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.5** (branch `feature-v0.6.5`), 19 Nov 2026 — Step Basket $10 FINAL file
+**v0.6.6** (branch `feature-v0.6.6`), 19 Nov 2026 — Universal EA v1.04 (Friday stop + news)
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.6 | 19 Nov 2026 | **SAMU Universal EA v1.04**: `filters.friday_stop` (Friday time IST ke baad + weekend nayi basket nahi) + `filters.news` (MT5 calendar High news ± min, sirf live/paper). Banner + info line. `step-basket.json` mein `friday_stop` (off) + EA built-in same. Docs EA-SETUP v1.04. VPS: samusignal `vps-ea/` + Helper v1.06 `vps-files/step-basket.json` (= FINAL) |
 | v0.6.5 | 19 Nov 2026 | **Step Basket $10 FINAL** (`strategies/step-basket-10-final.json`): lot table, basket SL 5% ($500), daily target 1% / loss 5%, Friday 14:00 IST (`filters.friday_stop`), news on (backtest mein nahi). Test: 1 mahine +$1,122 · 101 din +$1,138, DD 6.8%. SL $2000 test (20%) alag se: 101 din +$1,243, DD 8.6% — FINAL mein nahi. Lot table abhi owner ka confirm pending |
 | v0.6.4 | 19 Nov 2026 | **Step Basket $10** (`strategies/step-basket-10.json` lot table, `step-basket-10-fixed.json` 0.01): pehla trade Supertrend, koi TP nahi, $5 step (neeche SELL / upar BUY), basket +$10, basket SL 5%, daily target 1%, max 20 trades. Step Basket engine mein **Friday stop** (`filters.friday_stop`, IST) + test + form fields. Buttons **Step $10 (lot table)** / **Step $10 (0.01)**. Fix: nayi strategy load hone par RUN ka preset us strategy ka apna (pehle pichhli strategy ka B reh jaata tha) |
 | v0.6.3 | 19 Nov 2026 | `strategies/quad-basket-set-c.json` + **QUAD Set C** button. Settings Ankush ne Sheet "QUAD Set B — Settings + aapke badlav" (claude.ai artifact) ke peele column mein bhari |
