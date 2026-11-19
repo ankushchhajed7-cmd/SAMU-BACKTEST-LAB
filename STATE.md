@@ -4,12 +4,12 @@
 **v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
 
 ## EA
-**SAMU Universal EA v1.00** (branch `feature-ea-v1.00`) — code ready, **compile + tester run VPS pe baaki** (yahan MT5 nahi hai). Setup: `docs/EA-SETUP.md`
+**SAMU Universal EA v1.00** (branch `feature-ea-v1.00`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
-| EA v1.00 | 19 Nov 2026 | `ea/SAMU Universal EA v1.00.mq5`: JSON parser (MQL5\Files), same engine rules, Supertrend (SMA/RMA, closed bar), grid + lot table, presets TP/SL/trailing, TP1 (broker + virtual), daily target/loss 07:00 IST, spread/time filters, restart-safe state (Global Variables), trade log CSV (app ke Trades CSV jaisa), Gold Luxe dashboard (DPI scale, PAUSE / CLOSE ALL, CONFIG ERROR banner). `tests/ea-config.test.js`, `docs/EA-SETUP.md` |
+| EA v1.00 | 19 Nov 2026 | `ea/SAMU Universal EA v1.00.mq5`: JSON parser (MQL5\Files), same engine rules, Supertrend (SMA/RMA, closed bar), grid + lot table, presets TP/SL/trailing, TP1 (broker + virtual), daily target/loss 07:00 IST, spread/time filters, built-in strategy fallback (JSON file na ho to), restart-safe state (Global Variables), trade log CSV (app ke Trades CSV jaisa), Gold Luxe dashboard (DPI scale, PAUSE / CLOSE ALL, CONFIG ERROR banner). `tests/ea-config.test.js`, `docs/EA-SETUP.md` |
 | v0.5.1 | 19 Nov 2026 | Header mein ⟳ Refresh button: app cache saaf + latest version + reload (data safe). Refresh ke baad toast ("Update ho gaya: purana → naya"). Offline pe refresh nahi. Service worker ab browser HTTP cache bypass karta hai (`no-cache`) |
 | v0.5.0 | 19 Nov 2026 | Strategy form editor (30 fields, 8 groups): general, Supertrend, pehla trade TP, grid, lot table (row add/delete + auto-fill N/start/badhat), basket preset (TP/SL/trailing on-off, naya preset copy, preset hatao), daily, costs & filters. Har change turant apply + validate + save; Run screen ke presets bhi update |
 | v0.4.0 | 19 Nov 2026 | Compare screen: saved runs list (max 24, duplicate check, select/remove), equity overlay (% return), side-by-side 23 metrics (best green / worst red), mahine-wise P/L per run, warnings (alag range/balance/strategy), Compare HTML export. Report pe "+ Compare", Matrix pe "Sab Compare mein daalo" (Worst-case rows auto-select). Engine `snapshot()` + 3 tests |

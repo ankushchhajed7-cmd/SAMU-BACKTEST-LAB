@@ -239,7 +239,7 @@ string JStr(JNode *r, const string path, const string def)
 //====================================================================
 //  CONFIG (filled from JSON)
 //====================================================================
-string  g_name, g_ver, g_cfgSymbol, g_tf, g_preset;
+string  g_name, g_ver, g_cfgSymbol, g_tf, g_preset, g_cfgSource = "";
 double  g_cs, g_point, g_off;
 ENUM_TIMEFRAMES g_tfEnum;
 int     g_atrP, g_warm, g_maxT, g_resetSec, g_maxSpread, g_tFrom, g_tTo;
@@ -262,18 +262,50 @@ int HhmmToMin(const string s)
    return (int)StringToInteger(p[0]) * 60 + (int)StringToInteger(p[1]);
   }
 
+//--- built-in copy of strategies/step-basket.json (used when the JSON file is missing,
+//--- e.g. EA deployed by VPS Helper which copies only .mq5). Kept in sync by tests/ea-config.test.js
+string BuiltinStrategy()
+  {
+   string s = "";
+   s += "{\"schema\":\"samu-strategy/1\",\"name\":\"Step Basket\",\"version\":\"1.0.0\",\"notes\":\"Supertrend sirf peh";
+   s += "le trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.\",\"symbol\":\"XAUUSDm\",\"cont";
+   s += "ract_size\":100,\"point\":0.001,\"server_gmt_offset_hours\":0,\"entry\":{\"type\":\"supertrend\",\"tf\":\"M15";
+   s += "\",\"atr_period\":10,\"multiplier\":3.0,\"atr_method\":\"sma\",\"use_closed_bar\":true,\"warmup_bars\":50,\"ope";
+   s += "n_on\":\"new_m1_bar\",\"role\":\"first_trade_direction\"},\"first_trade\":{\"tp_price\":5.0,\"remove_tp_on_sec";
+   s += "ond_trade\":true,\"grid_same_side_while_tp\":false},\"grid\":{\"step_price\":5.0,\"sell_below_lowest\":true,\"";
+   s += "buy_above_highest\":true,\"max_trades\":12,\"after_max\":\"wait_tp_sl\"},\"lots\":[{\"from\":1,\"to\":3,\"lot";
+   s += "\":0.01},{\"from\":4,\"to\":6,\"lot\":0.02},{\"from\":7,\"to\":9,\"lot\":0.03},{\"from\":10,\"to\":12,\"lot\":0";
+   s += ".04}],\"basket\":{\"preset\":\"B\",\"sl_base\":\"balance_at_basket_start\",\"presets\":{\"A\":{\"tp_usd\":10,";
+   s += "\"sl_pct_balance\":null,\"trail\":null},\"B\":{\"tp_usd\":null,\"sl_pct_balance\":1.0,\"trail\":{\"start_usd\":";
+   s += "10,\"drop_usd\":5}},\"C\":{\"tp_usd\":10,\"sl_pct_balance\":1.0,\"trail\":null}}},\"daily\":{\"target_pct\":1.";
+   s += "0,\"loss_pct\":5.0,\"base\":\"day_start_equity\",\"reset_time\":\"07:00\",\"tz\":\"IST\",\"on_hit\":\"close_al";
+   s += "l_stop_day\",\"open_basket_at_reset\":\"keep\"},\"costs\":{\"commission_per_lot\":0,\"swap\":false},\"filters";
+   s += "\":{\"max_spread_points\":0,\"time\":{\"enabled\":false,\"from\":\"00:00\",\"to\":\"23:59\",\"tz\":\"IST\"},\"n";
+   s += "ews\":{\"enabled\":false,\"before_min\":30,\"after_min\":30}}}";
+   return s;
+  }
+
 bool LoadConfig(string &err)
   {
    err = "";
    int flags = FILE_READ | FILE_BIN | (InpCommonFolder ? FILE_COMMON : 0);
    int h = FileOpen(InpStrategyFile, flags);
-   if(h == INVALID_HANDLE) { err = "File nahi mili: " + (InpCommonFolder ? "Common\\Files\\" : "MQL5\\Files\\") + InpStrategyFile; return false; }
-   int sz = (int)FileSize(h);
-   uchar buf[];
-   ArrayResize(buf, sz);
-   FileReadArray(h, buf, 0, sz);
-   FileClose(h);
-   string txt = CharArrayToString(buf, 0, sz, CP_UTF8);
+   string txt = "";
+   if(h == INVALID_HANDLE)
+     {
+      txt = BuiltinStrategy();
+      g_cfgSource = "built-in";
+     }
+   else
+     {
+      int sz = (int)FileSize(h);
+      uchar buf[];
+      ArrayResize(buf, sz);
+      FileReadArray(h, buf, 0, sz);
+      FileClose(h);
+      txt = CharArrayToString(buf, 0, sz, CP_UTF8);
+      g_cfgSource = "file";
+     }
    if(StringLen(txt) > 0 && StringGetCharacter(txt, 0) == 0xFEFF) txt = StringSubstr(txt, 1);
 
    JParser parser;
@@ -859,7 +891,7 @@ void Dash()
 
    // header
    Lbl("brand", Spaced("SAMU UNIVERSAL EA"), M, P(18), 11, C_GOLDD);
-   Lbl("sub", EA_VERSION + Dot() + g_name + " " + g_ver + Dot() + "Preset " + g_preset + Dot() + _Symbol + Dot() + "Magic " + (string)InpMagic, M, P(38), 12, C_MUT);
+   Lbl("sub", EA_VERSION + Dot() + g_name + " " + g_ver + " (" + (g_cfgSource == "file" ? InpStrategyFile : "built-in") + ")" + Dot() + "Preset " + g_preset + Dot() + _Symbol + Dot() + "Magic " + (string)InpMagic, M, P(38), 12, C_MUT);
    Lbl("ist", "IST  " + TimeToString(ToIst(srv), TIME_SECONDS), W - M, P(16), 14, C_GOLD2, F_MONO, true);
    Lbl("srv", "SERVER  " + TimeToString(srv, TIME_SECONDS), W - M, P(38), 12, C_MUT, F_MONO, true);
 
@@ -972,6 +1004,7 @@ int OnInit()
       return INIT_SUCCEEDED;
      }
    g_warnMsg = "";
+   if(g_cfgSource == "built-in") g_warnMsg = "MQL5\\Files\\" + InpStrategyFile + " nahi mili  -  built-in Step Basket settings se chal raha hai";
    if(g_cfgSymbol != "" && g_cfgSymbol != _Symbol) g_warnMsg = "Strategy symbol " + g_cfgSymbol + " hai, chart " + _Symbol + " hai";
    double cs = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
    if(MathAbs(cs - g_cs) > 1e-9) g_warnMsg = StringFormat("Contract size: JSON %.0f, broker %.0f", g_cs, cs);
@@ -1008,8 +1041,8 @@ int OnInit()
       Dash();
      }
    EventSetTimer(1);
-   PrintFormat("%s %s ready: %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
-               EA_NAME, EA_VERSION, g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
+   PrintFormat("%s %s ready (%s): %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
+               EA_NAME, EA_VERSION, g_cfgSource, g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
    return INIT_SUCCEEDED;
   }
 

@@ -1,6 +1,10 @@
 # SAMU Universal EA v1.00 — VPS setup
 
-## 1. Files copy karo (VPS pe)
+## 0. VPS Helper (automatic)
+EA ki file `samusignal` repo ke `vps-ea/` folder mein, main branch pe hai. **SamuSignal VPS Helper** 2 min mein use VPS ke har MT5 terminal ke `MQL5\Experts` mein daal ke compile kar deta hai. Compile ka result: SamuSignal app → **COPY tab → VPS Helper**.
+Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **built-in Step Basket** settings se chalta hai (dashboard banner batata hai). Apni settings chahiye to neeche step 1.3 se JSON daalo.
+
+## 1. Files copy karo (haath se, agar helper nahi)
 1. MT5 → **File → Open Data Folder**
 2. `MQL5\Experts\` mein daalo: **`SAMU Universal EA v1.00.mq5`** (repo ka `ea/` folder)
 3. `MQL5\Files\` mein daalo: **`step-basket.json`** (repo ka `strategies/` folder)
