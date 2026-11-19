@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.6** (branch `feature-v0.6.6`), 19 Nov 2026 — Universal EA v1.04 (Friday stop + news)
+**v0.7.0** (branch `feature-v0.7.0`), 19 Nov 2026 — Liquidity Sweep engine (QUANT PILOT strategy) + tick volume
 
 ## EA
 **SAMU Universal EA v1.04** — Friday stop + news filter; VPS Helper se VPS pe (samusignal `vps-ea/`), strategy JSON bhi Helper v1.06 se (`vps-files/step-basket.json` = Step Basket $10 FINAL). Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.7.0 | 19 Nov 2026 | **Liquidity Sweep engine** (`runSweep`, schema `samu-strategy/3`): Sumedh Kumar ke QUANT PILOT repo (github.com/sumedhkumar/sumedhkumarQP) ki strategy ka JS port — levels (PDH/PDL, Asia, 4H swing, EQH/EQL), sweep + displacement, rule-based confidence, Guardian (1% risk, max 2, DD 4%, London/NY, cooldown), BE 1R / TP1 50% / trailing / TP2. Presets: **REAL** (M1 fill + CSV spread), **QP** (unka apna backtester, trade-by-trade match), REAL_ALLDAY, REAL_CONF6. `strategies/liquidity-sweep-qp.json` (`default_balance` 10000 → button se load pe RUN balance $10k), Strategy screen pe **Liquidity Sweep (QUANT PILOT)** button + form, Run/Report pe Guardian + exits card, HTML report mein sweep trades (level, confidence). CSV loader ab **tick volume** bhi rakhta hai (`ds.v`, IndexedDB mein bhi). `docs/SWEEP-RULES.md`, `tests/sweep.test.js` (25). Header version fix (v0.6.4 dikh raha tha) |
 | v0.6.6 | 19 Nov 2026 | **SAMU Universal EA v1.04**: `filters.friday_stop` (Friday time IST ke baad + weekend nayi basket nahi) + `filters.news` (MT5 calendar High news ± min, sirf live/paper). Banner + info line. `step-basket.json` mein `friday_stop` (off) + EA built-in same. Docs EA-SETUP v1.04. VPS: samusignal `vps-ea/` + Helper v1.06 `vps-files/step-basket.json` (= FINAL) |
 | v0.6.5 | 19 Nov 2026 | **Step Basket $10 FINAL** (`strategies/step-basket-10-final.json`): lot table, basket SL 5% ($500), daily target 1% / loss 5%, Friday 14:00 IST (`filters.friday_stop`), news on (backtest mein nahi). Test: 1 mahine +$1,122 · 101 din +$1,138, DD 6.8%. SL $2000 test (20%) alag se: 101 din +$1,243, DD 8.6% — FINAL mein nahi. Lot table abhi owner ka confirm pending |
 | v0.6.4 | 19 Nov 2026 | **Step Basket $10** (`strategies/step-basket-10.json` lot table, `step-basket-10-fixed.json` 0.01): pehla trade Supertrend, koi TP nahi, $5 step (neeche SELL / upar BUY), basket +$10, basket SL 5%, daily target 1%, max 20 trades. Step Basket engine mein **Friday stop** (`filters.friday_stop`, IST) + test + form fields. Buttons **Step $10 (lot table)** / **Step $10 (0.01)**. Fix: nayi strategy load hone par RUN ka preset us strategy ka apna (pehle pichhli strategy ka B reh jaata tha) |
@@ -36,6 +37,9 @@
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
 | `strategies/quad-basket.json` | QUAD Basket 4-EA portfolio (schema `samu-strategy/2`) |
 | `docs/QUAD-RULES.md` | QUAD engine ke exact rules (4 EA + TESTER EA parity) |
+| `strategies/liquidity-sweep-qp.json` | Liquidity Sweep (QUANT PILOT) strategy (schema `samu-strategy/3`) |
+| `docs/SWEEP-RULES.md` | Liquidity Sweep engine ke exact rules + QP/REAL modes |
+| `tests/sweep.test.js` | Sweep engine tests (`node tests/sweep.test.js`) |
 | `tests/quad.test.js` | QUAD engine tests (`node tests/quad.test.js`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
@@ -99,7 +103,17 @@
 - Lot table, poore 101 din: **+$1,138 (+11.4%)**, DD 6.8%, PF 1.36, 4 basket SL (−$500 ke aaspaas) + 1 daily loss; mahine: 10 Aug–10 Sep −3.2%, 10 Sep–10 Oct +6.6%, 10 Oct–19 Nov +11.9%. Raaste (O→L→H→C / O→H→L→C / Worst) pe bhi +11% se +18%
 - Dhyan: sirf 3 mahine ka data; ek basket SL = ~5% ($500). Agla kadam: Universal EA mein Friday stop + PAPER test
 
+## Liquidity Sweep (QUANT PILOT) — pehla backtest (19 Nov 2026)
+- Ankush ne Sumedh Kumar ka repo (Python + React "QUANT PILOT", 7 agent, MT5 Windows only) check karwaya, phir Lab mein backtest maanga. Code scan: koi bahar data bhejne wala code nahi (SAFE)
+- Data: Exness-MT5Trial17 XAUUSDm M1, 100,000 bars = 10 Aug → 19 Nov 2026 (101 din), $10,000, 1% risk
+- **QP preset (unka apna backtester):** 19 trades, **−$463 (−4.6%)**, win 15.8%, PF 0.57, DD 10.3%. Python `run_backtest` se bilkul same 19 trades / −$463.25 (parity OK)
+- **REAL (M1 fill + Exness spread):** 28 trades, **−$400 (−4.0%)**, win 21%, PF 0.73, max DD 11.7% ($1,167), lagatar 10 trade bina profit (SL/BE). Mahine: Aug −4.7%, Sep −1.4%, Oct −0.8%, Nov +3.0%. Exits: SL 16 (−$1,457), BE 6, Trailing 4 (+$591), TP2 2 (+$466). 0.32 trades/din. Raaste (Auto/OLHC/OHLC/Worst) se farq nahi
+- Spread 0: −3.6% → spread wajah nahi. Session off (Asia bhi): 40 trades −4.1%. Confidence ≥ 6: 34 trades −4.0%, DD 13.1%
+- QUANT PILOT ka RR veto bug: rounded prices se RR 1.99 nikalta hai → 18 achhe setups unke backtester mein reject (REAL mein theek kiya, isliye 28 trades)
+- Depth 10–25 pips ($1.0–$2.5) unke tests mein gold $2,650 pe socha gaya; abhi gold $3,700–4,600 → sweep window bahut chhota. Agla idea (Ankush ka faisla baaki): depth ko ATR/price ke hisaab se scale karke test
+
 ## Pending / next
+- [ ] Liquidity Sweep: Ankush decide kare — chhod do, ya depth scale (ATR) / TP badal ke naya test; achha nikle tabhi MQL5 EA
 - [ ] Universal EA: `filters.friday_stop` support (Step $10 ko VPS pe PAPER chalane ke liye)
 - [x] v0.6.1 "GitHub se Data" (INVESTOR-ID v1.13 M1 export) — INVESTOR-ID PR #28 merge + pehla asli run baaki
 - [x] QUAD ka pehla asli backtest (19 Nov 2026): Exness-MT5Trial17 XAUUSDm M1, 100,000 bars = 10 Aug → 19 Nov 2026 (101 din; MT5 maxbars 100k pe ruka), $10,000, CSV spread (median 240 pts):

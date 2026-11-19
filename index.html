@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.6.4</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.7.0</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -226,6 +226,7 @@ section.scr.on{display:block}
       <button class="btn small" id="btnQuadC">QUAD Set C</button>
       <button class="btn small" id="btnStep10">Step $10 (lot table)</button>
       <button class="btn small" id="btnStep10f">Step $10 (0.01)</button>
+      <button class="btn small" id="btnSweep">Liquidity Sweep (QUANT PILOT)</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -435,7 +436,7 @@ section.scr.on{display:block}
 </nav>
 
 <script id="engine">
-/* ===================== SAMU ENGINE v0.6.0 =====================
+/* ===================== SAMU ENGINE v0.7.0 =====================
    Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
    (Universal EA must follow the same rules for parity). */
 var SamuEngine = (function () {
@@ -490,6 +491,7 @@ var SamuEngine = (function () {
   /* ---------- run ---------- */
   function run(ds, st, opt) {
     if (st && st.schema === 'samu-strategy/2') return runQuad(ds, st, opt);
+    if (st && st.schema === 'samu-strategy/3') return runSweep(ds, st, opt);
     opt = opt || {};
     var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s;
     var N = T.length;
@@ -1134,6 +1136,399 @@ var SamuEngine = (function () {
     return r;
   }
 
+  /* ---------- LIQUIDITY SWEEP engine (schema samu-strategy/3) ----------
+     QUANT PILOT (Sumedh Kumar) ke rules ka port. Rules: docs/SWEEP-RULES.md
+     exec 'qp' = QUANT PILOT ka apna backtester (M5 close pe fill, spread 0, candle pe SL pehle)
+     exec 'm1' = asli: M5 signal, agle M1 open pe fill, CSV spread, M1 raaste pe SL/TP */
+  function rnd(x, d) { return +x.toFixed(d); }
+  function mod(a, b) { return ((a % b) + b) % b; }
+  function sessionOf(u) { var h = Math.floor(mod(u, 86400) / 3600); return h < 7 ? 'ASIAN' : h < 12 ? 'LONDON' : h < 21 ? 'NEW_YORK' : 'OFF_HOURS'; }
+  // OHLCV bins of M[a..b) on `sec` (UTC aligned), empty bins skipped (pandas resample + dropna)
+  function binsOf(M, a, b, sec) {
+    var R = { t: [], o: [], h: [], l: [], c: [] }, k = -1, cur = null;
+    for (var i = a; i < b; i++) {
+      var s = M.t[i] - mod(M.t[i], sec);
+      if (s !== cur) { cur = s; k++; R.t.push(s); R.o.push(M.o[i]); R.h.push(M.h[i]); R.l.push(M.l[i]); R.c.push(M.c[i]); }
+      else { if (M.h[i] > R.h[k]) R.h[k] = M.h[i]; if (M.l[i] < R.l[k]) R.l[k] = M.l[i]; R.c[k] = M.c[i]; }
+    }
+    return R;
+  }
+  // fractal swings: extreme of left+right neighbours, unique in window
+  function swingPts(h, l, left, right) {
+    var SH = [], SL = [];
+    for (var i = left; i < h.length - right; i++) {
+      var mx = -Infinity, mn = Infinity, ch = 0, cl = 0, k;
+      for (k = i - left; k <= i + right; k++) { if (h[k] > mx) mx = h[k]; if (l[k] < mn) mn = l[k]; }
+      for (k = i - left; k <= i + right; k++) { if (h[k] === h[i]) ch++; if (l[k] === l[i]) cl++; }
+      if (h[i] === mx && ch === 1) SH.push(h[i]);
+      if (l[i] === mn && cl === 1) SL.push(l[i]);
+    }
+    return { H: SH, L: SL };
+  }
+  function eqClusters(pts, tol, side) {
+    var prices = pts.slice(-12).sort(function (a, b) { return a - b; }), out = [], cl = [];
+    function push() { out.push({ name: side === 'high' ? 'EQH' : 'EQL', price: side === 'high' ? Math.max.apply(null, cl) : Math.min.apply(null, cl), side: side, strength: cl.length }); }
+    for (var i = 0; i < prices.length; i++) {
+      var p = prices[i];
+      if (cl.length && p - cl[0] > tol) { if (cl.length >= 2) push(); cl = []; }
+      cl.push(p);
+    }
+    if (cl.length >= 2) push();
+    return out;
+  }
+  function dedupeLv(levels, tol) {
+    var srt = levels.slice().sort(function (a, b) { return b.strength - a.strength; }), out = [];
+    srt.forEach(function (lv) {
+      var clash = null;
+      for (var i = 0; i < out.length; i++) if (out[i].side === lv.side && Math.abs(out[i].price - lv.price) <= tol) { clash = out[i]; break; }
+      if (clash) { if (clash.name.indexOf(lv.name) < 0) clash.name += '+' + lv.name; clash.strength += lv.strength; }
+      else out.push({ name: lv.name, price: lv.price, side: lv.side, strength: lv.strength });
+    });
+    return out.sort(function (a, b) { return a.price - b.price; });
+  }
+  // Cartographer: PDH/PDL, Asia range, 4H swings, equal highs/lows from M5 bars [a, b)
+  function mapLevels(M, a, b, P) {
+    if (b - a < 50) return [];
+    var lv = [], last = M.t[b - 1], today = last - mod(last, 86400), i;
+    var D = binsOf(M, a, b, 86400), k = -1;
+    for (i = 0; i < D.t.length; i++) if (D.t[i] < today) k = i;
+    if (k >= 0) { lv.push({ name: 'PDH', price: D.h[k], side: 'high', strength: 2 }); lv.push({ name: 'PDL', price: D.l[k], side: 'low', strength: 2 }); }
+    var asia = Math.floor(mod(last, 86400) / 3600) >= 7 ? today : today - 86400, ah = -Infinity, al = Infinity, an = 0;
+    for (i = a; i < b; i++) if (M.t[i] >= asia && M.t[i] < asia + 7 * 3600) { an++; if (M.h[i] > ah) ah = M.h[i]; if (M.l[i] < al) al = M.l[i]; }
+    if (an >= 6) { lv.push({ name: 'ASIA_HIGH', price: ah, side: 'high', strength: 1 }); lv.push({ name: 'ASIA_LOW', price: al, side: 'low', strength: 1 }); }
+    var H4 = binsOf(M, a, b, 14400), sw = swingPts(H4.h, H4.l, 2, 2);
+    sw.H.slice(-3).forEach(function (p) { lv.push({ name: 'SWING_4H_HIGH', price: p, side: 'high', strength: 1 }); });
+    sw.L.slice(-3).forEach(function (p) { lv.push({ name: 'SWING_4H_LOW', price: p, side: 'low', strength: 1 }); });
+    var Q = binsOf(M, Math.max(a, b - 288), b, 900), eq = swingPts(Q.h, Q.l, 2, 2), tol = P.eq_tolerance_price;
+    lv = lv.concat(eqClusters(eq.H, tol, 'high'), eqClusters(eq.L, tol, 'low'));
+    return dedupeLv(lv, tol);
+  }
+  // Hunter: setups whose displacement (confirmation) candle is M5 bar i
+  function detectAt(M, i, levels, P, round) {
+    var lb = P.body_lookback, rr = round ? rnd : function (x) { return x; };
+    if (i < lb + 8) return [];
+    var s0 = Math.max(0, i - lb), bs = 0, vs = 0, k;
+    for (k = s0; k < i; k++) { bs += Math.abs(M.c[k] - M.o[k]); vs += M.v[k]; }
+    var avgBody = i > s0 ? bs / (i - s0) : 1e-9; if (!(avgBody > 0)) avgBody = 1e-9;
+    var avgVol = (i > s0 ? vs / (i - s0) : 0) || 1;
+    var disp = Math.abs(M.c[i] - M.o[i]) / avgBody;
+    if (disp < P.displacement_mult) return [];
+    var out = [];
+    for (var q = 0; q < levels.length; q++) {
+      var lv = levels[q], Lp = lv.price, hi = lv.side === 'high';
+      for (var j = i; j > i - P.confirm_candles; j--) {
+        if (j < 7) break;
+        var pierced, confirm, earlier = false, m7;
+        if (hi) {
+          m7 = -Infinity; for (k = j - 7; k < j; k++) if (M.h[k] > m7) m7 = M.h[k];
+          pierced = M.h[j] > Lp && M.c[j - 1] < Lp && m7 <= Lp;
+          confirm = M.c[i] < Lp && M.c[i] < M.o[i];
+          for (k = j; k < i; k++) if (M.c[k] < Lp && M.c[k] < M.o[k] && Math.abs(M.c[k] - M.o[k]) / avgBody >= P.displacement_mult) earlier = true;
+        } else {
+          m7 = Infinity; for (k = j - 7; k < j; k++) if (M.l[k] < m7) m7 = M.l[k];
+          pierced = M.l[j] < Lp && M.c[j - 1] > Lp && m7 >= Lp;
+          confirm = M.c[i] > Lp && M.c[i] > M.o[i];
+          for (k = j; k < i; k++) if (M.c[k] > Lp && M.c[k] > M.o[k] && Math.abs(M.c[k] - M.o[k]) / avgBody >= P.displacement_mult) earlier = true;
+        }
+        if (!(pierced && confirm) || earlier) continue;
+        var ext = hi ? -Infinity : Infinity;
+        for (k = j; k <= i; k++) { if (hi) { if (M.h[k] > ext) ext = M.h[k]; } else if (M.l[k] < ext) ext = M.l[k]; }
+        var depth = Math.abs(ext - Lp) / P.pip;
+        if (!(depth >= P.min_depth_pips && depth <= P.max_depth_pips)) continue;
+        var entry = M.c[i], buf = P.sl_buffer_pips * P.pip, sl, risk, tp1, tp2, dir;
+        var pools = levels.filter(function (x) { return x.side === (hi ? 'low' : 'high'); }).map(function (x) { return x.price; });
+        if (hi) {
+          dir = -1; sl = ext + buf; risk = sl - entry; tp1 = entry - P.tp1_rr * risk;
+          pools = pools.filter(function (p) { return p < tp1; }).sort(function (a, b) { return b - a; });
+          tp2 = null; for (k = 0; k < pools.length; k++) if ((entry - pools[k]) / risk >= P.tp2_min_rr) { tp2 = pools[k]; break; }
+          if (tp2 == null) tp2 = entry - P.tp2_min_rr * risk;
+        } else {
+          dir = 1; sl = ext - buf; risk = entry - sl; tp1 = entry + P.tp1_rr * risk;
+          pools = pools.filter(function (p) { return p > tp1; }).sort(function (a, b) { return a - b; });
+          tp2 = null; for (k = 0; k < pools.length; k++) if ((pools[k] - entry) / risk >= P.tp2_min_rr) { tp2 = pools[k]; break; }
+          if (tp2 == null) tp2 = entry + P.tp2_min_rr * risk;
+        }
+        if (risk <= 0) continue;
+        out.push({
+          id: lv.name + '-' + M.t[j], level: lv, dir: dir, sweepT: M.t[j], confT: M.t[i], ext: ext,
+          depth: rnd(depth, 3), disp: rnd(disp, 2), vspike: Math.max(M.v[j], M.v[i]) > P.volume_spike_mult * avgVol,
+          entry: rr(entry, 2), sl: rr(sl, 2), tp1: rr(tp1, 2), tp2: rr(tp2, 2), session: sessionOf(M.t[i])
+        });
+        break; // one setup per level
+      }
+    }
+    return out;
+  }
+  // Analyst (rule-based, QUANT PILOT mock_decision): confidence 1..10
+  function sweepScore(s) {
+    var sc = 4 + (s.disp >= 2 ? 2 : s.disp >= 1.5 ? 1 : 0);
+    if (s.vspike) sc++;
+    if (s.level.strength >= 2 || s.level.name.indexOf('+') >= 0) sc++;
+    if (s.session === 'LONDON' || s.session === 'NEW_YORK') sc++;
+    if (Math.abs(s.depth - 17.5) <= 4.5) sc++; // QUANT PILOT: fixed 10–25 pips band
+    return Math.max(1, Math.min(10, Math.round(sc)));
+  }
+  function normVol(raw, vmin, vstep, vmax) {
+    if (raw < vmin) return 0;
+    var v = vmin + Math.floor((raw - vmin) / vstep + 1e-9) * vstep;
+    return rnd(Math.min(v, vmax), 2);
+  }
+
+  function runSweep(ds, st, opt) {
+    opt = opt || {};
+    var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s, V = ds.v, N = T.length;
+    var cs = st.contract_size, point = opt.point || st.point;
+    var off = (opt.offset != null ? opt.offset : st.server_gmt_offset_hours) || 0, OFF = off * 3600;
+    var presetKey = opt.preset || st.basket.preset, PR = st.basket.presets[presetKey] || {};
+    var exec = PR.exec || 'm1', isQP = exec === 'qp';
+    var sg = st.signal, rk = st.risk, mg = st.manage || {};
+    var P = {
+      pip: sg.pip_size, min_depth_pips: sg.min_depth_pips, max_depth_pips: sg.max_depth_pips, displacement_mult: sg.displacement_mult,
+      confirm_candles: sg.confirm_candles, sl_buffer_pips: sg.sl_buffer_pips, tp1_rr: sg.tp1_rr, tp2_min_rr: sg.tp2_min_rr,
+      body_lookback: sg.body_lookback, volume_spike_mult: sg.volume_spike_mult, eq_tolerance_price: sg.eq_tolerance_pips * sg.pip_size
+    };
+    var sessions = PR.session_filter === false ? null : (rk.sessions || ['LONDON', 'NEW_YORK']);
+    var minConf = PR.min_confidence != null ? PR.min_confidence : rk.min_confidence;
+    var riskPct = Math.min(PR.risk_pct != null ? PR.risk_pct : rk.risk_pct, rk.max_risk_pct);
+    var maxOpen = rk.max_open_trades, ddKill = rk.daily_dd_kill_pct, minRR = rk.min_rr, cool = (rk.cooldown_min || 0) * 60;
+    var spLimit = rk.spread_limit_price, newsH = (rk.news_hours_utc || []);
+    var vmin = st.lot_min || 0.01, vstep = st.lot_step || 0.01, vmax = st.lot_max || 50;
+    var beOn = mg.breakeven_at_1r !== false, partOn = mg.partial_at_tp1 !== false, trailOn = mg.trail_after_tp1 !== false;
+    var comm = (st.costs && st.costs.commission_per_lot) || 0;
+    var d = st.daily || {}, rp = (d.reset_time || '07:00').split(':'), resetSec = (+rp[0]) * 3600 + (+rp[1]) * 60;
+    var pathMode = opt.path || 'auto';
+    var spreadFixed = opt.spreadMode === 'fixed' || !SP;
+    var fixedPts = opt.fixedPts != null ? opt.fixedPts : 200;
+    var warmup = st.warmup_m5_bars != null ? st.warmup_m5_bars : 300, refresh = st.levels_refresh_m5_bars || 24;
+    var warn = [];
+    if (!V) warn.push('Data mein tick volume nahi — "volume spike" bonus nahi milega. Data dobara load karo (v0.7.0+).');
+
+    // ---- M5 bars (UTC) from M1 ----
+    var M = { t: [], o: [], h: [], l: [], c: [], v: [], last: [] }, m5of = new Int32Array(N), cur = null, kk = -1;
+    for (var i = 0; i < N; i++) {
+      var u = T[i] - OFF, s = u - mod(u, 300);
+      if (s !== cur) { cur = s; kk++; M.t.push(s); M.o.push(O[i]); M.h.push(H[i]); M.l.push(L[i]); M.c.push(C[i]); M.v.push(V ? V[i] : 0); M.last.push(i); }
+      else { if (H[i] > M.h[kk]) M.h[kk] = H[i]; if (L[i] < M.l[kk]) M.l[kk] = L[i]; M.c[kk] = C[i]; M.v[kk] += V ? V[i] : 0; M.last[kk] = i; }
+      m5of[i] = kk;
+    }
+
+    // range
+    var i0 = 0, i1 = N - 1;
+    if (opt.from != null) while (i0 < N && T[i0] < opt.from) i0++;
+    if (opt.to != null) while (i1 >= 0 && T[i1] >= opt.to) i1--;
+    if (i1 < i0) throw new Error('Is date range mein data nahi hai');
+
+    var startBal = opt.balance || 10000;
+    var trades = [], baskets = [], days = [], dayStops = [];
+    var veto = {}, setupsN = 0, taken = 0;
+    var S = { bal: startBal, pos: [], nextId: 1, ddDay: null, ddStartEq: startBal, recent: {}, seen: {}, eqMin: Infinity, ev: [], levels: [] };
+
+    function pnlAt(p, price, vol) { return p.dir * (price - p.op) * vol * cs; }
+    function exitPx(p, bid, spr) { return p.dir === 1 ? bid : bid + spr; }
+    function unreal(s, bid, spr) { var u = 0; for (var q = 0; q < s.pos.length; q++) { var p = s.pos[q]; u += pnlAt(p, exitPx(p, bid, spr), p.vol); } return u; }
+    function closePos(s, p, price, reason, t) {
+      var pr = pnlAt(p, price, p.vol) - comm * p.vol;
+      s.bal += pr; p.real += pr;
+      if (isQP) p.real = rnd(p.real, 2);
+      s.ev.push({ k: 'T', id: p.id, b: p.id, dir: p.dir, lot: p.vol0, ot: p.ot, op: p.op, ct: t, cp: price, pr: p.real, r: reason, tp1: p.tp1hit, lvl: p.lvl, conf: p.conf });
+      s.ev.push({ k: 'B', id: p.id, dir: p.dir, ot: p.ot, ct: t, n: 1, pr: p.real, r: reason, minPL: p.minPL, peakPL: p.peakPL, startBal: p.startBal });
+      s.pos.splice(s.pos.indexOf(p), 1);
+    }
+    function partial(s, p, price) {
+      var half = normVol(p.vol / 2, vmin, vstep, p.vol);
+      if (half > 0 && half < p.vol) {
+        var pr = pnlAt(p, price, half) - comm * half;
+        s.bal += pr; p.real = isQP ? rnd(p.real + pr, 2) : p.real + pr; p.vol = rnd(p.vol - half, 2);
+      }
+    }
+    function track(s, bid, spr) {
+      var eq = s.bal + unreal(s, bid, spr); if (eq < s.eqMin) s.eqMin = eq;
+      for (var q = 0; q < s.pos.length; q++) { var p = s.pos[q], pl = p.real + pnlAt(p, exitPx(p, bid, spr), p.vol); if (pl < p.minPL) p.minPL = pl; if (pl > p.peakPL) p.peakPL = pl; }
+    }
+    function flush(s) {
+      for (var q = 0; q < s.ev.length; q++) { var e = s.ev[q]; if (e.k === 'T') trades.push(e); else if (e.k === 'B') { e.maxN = 1; baskets.push(e); } }
+      s.ev = [];
+    }
+
+    // Guardian (AEGIS): returns lot or 0 (veto counted)
+    function guardian(s, su, equity, spreadPrice, utc) {
+      var fails = [], conf = sweepScore(su);
+      if (spreadPrice > spLimit + 1e-12) fails.push('Spread');
+      var dd = s.ddStartEq > 0 ? Math.max(0, (s.ddStartEq - equity) / s.ddStartEq * 100) : 0;
+      if (!(dd < ddKill)) fails.push('Daily drawdown');
+      if (!(s.pos.length < maxOpen)) fails.push('Max open trades');
+      var risk = Math.abs(su.entry - su.sl), rr = risk > 0 ? Math.abs(su.tp1 - su.entry) / risk : 0;
+      var geom = su.dir === 1 ? (su.sl < su.entry && su.entry < su.tp1) : (su.sl > su.entry && su.entry > su.tp1);
+      if (!(geom && rr + 1e-9 >= minRR)) fails.push('Risk:Reward');
+      if (conf < minConf) fails.push('Confidence');
+      if (sessions && sessions.indexOf(su.session) < 0) fails.push('Session');
+      if (newsH.indexOf(Math.floor(mod(utc, 86400) / 3600)) >= 0) fails.push('News');
+      var key = su.level.name, dup = !!s.seen[su.id], last = s.recent[key];
+      if (dup || (last != null && utc - last < cool)) fails.push('Duplicate / cooldown');
+      var vol = 0, lossPerLot = risk * cs;
+      if (risk > 0 && equity > 0) vol = normVol(equity * riskPct / 100 / lossPerLot, vmin, vstep, vmax);
+      if (!(vol > 0)) fails.push('Position size');
+      else if (rnd(vol * lossPerLot, 2) / equity * 100 > rk.max_risk_pct + 1e-6) fails.push('Position size');
+      s.seen[su.id] = 1;
+      if (fails.length) { fails.forEach(function (f) { veto[f] = (veto[f] || 0) + 1; }); return { vol: 0, conf: conf }; }
+      return { vol: vol, conf: conf };
+    }
+    function signalsAt(s, k) {
+      if (k % refresh === 0 || !s.levels.length) s.levels = mapLevels(M, Math.max(0, k - 600), k - P.confirm_candles, P);
+      var su = detectAt(M, k, s.levels, P, isQP); setupsN += su.length; return su;
+    }
+    function newPos(s, su, vol, conf, fill, t, utc) {
+      s.pos.push({ id: s.nextId++, dir: su.dir, vol: vol, vol0: vol, op: fill, sl: su.sl, sl0: su.sl, tp1: su.tp1, tp2: su.tp2, ot: t,
+        real: 0, un: 0, tp1hit: false, be: false, minPL: 0, peakPL: 0, startBal: s.bal, lvl: su.level.name, conf: conf });
+      s.recent[su.level.name] = utc; taken++;
+    }
+    function ddDayCheck(s, utc, eq) { var dk = Math.floor(utc / 86400); if (dk !== s.ddDay) { s.ddDay = dk; s.ddStartEq = eq; } }
+
+    var eqClose, eqLow, barT, curDay = null;
+    function dayRoll(t, eq, j) {
+      var dk = Math.floor((t - OFF + IST - resetSec) / 86400);
+      if (!curDay || dk !== curDay.key) {
+        if (curDay) { curDay.endEq = eqClose[j - 1]; curDay.endBal = S.bal; days.push(curDay); }
+        curDay = { key: dk, startEq: eq, startT: t };
+      }
+    }
+
+    if (isQP) {
+      /* ===== QUANT PILOT original: M5 bars, fill at M5 close, no spread ===== */
+      var k0 = m5of[i0], k1 = m5of[i1], start = Math.max(k0, warmup);
+      if (k1 < start) throw new Error('Data kam hai: kam se kam ' + warmup + ' M5 bars chahiye');
+      var n5 = k1 - start + 1;
+      eqClose = new Float64Array(n5); eqLow = new Float64Array(n5); barT = new Float64Array(n5);
+      var qpSpread = PR.spread_points_assumed != null ? PR.spread_points_assumed * 0.01 : 0.25;
+      function qpEq(s) { var u = 0; s.pos.forEach(function (p) { u += p.un; }); return rnd(s.bal + u, 2); }
+      for (var k = start; k <= k1; k++) {
+        var tS = T[M.last[k]], utc = M.t[k], j = k - start;
+        ddDayCheck(S, utc, qpEq(S));
+        dayRoll(M.t[k] + OFF, qpEq(S), j);
+        var hi = M.h[k], lo = M.l[k], cl = M.c[k], worst = S.bal;
+        S.pos.forEach(function (p) { var wp = p.dir === 1 ? Math.max(lo, p.sl) : Math.min(hi, p.sl); worst += pnlAt(p, wp, p.vol); });
+        if (worst < S.eqMin) S.eqMin = worst;
+        S.pos.slice().forEach(function (p) {
+          var lg = p.dir === 1, r = Math.abs(p.op - p.sl0), adv = lg ? lo : hi, fav = lg ? hi : lo;
+          if ((lg && adv <= p.sl) || (!lg && adv >= p.sl)) {
+            var why = p.be && Math.abs(p.sl - p.op) < 1e-9 ? 'BE' : (p.tp1hit ? 'TRAIL' : 'SL');
+            closePos(S, p, p.sl, why, tS); return;
+          }
+          var reached = function (x) { return lg ? fav >= x : fav <= x; };
+          if (beOn && !p.be && reached(p.op + (lg ? r : -r))) { p.sl = p.op; p.be = true; }
+          if (!p.tp1hit && reached(p.tp1)) {
+            p.tp1hit = true;
+            if (partOn) partial(S, p, p.tp1);
+            if (!p.be) p.sl = p.op; p.be = true;
+          }
+          if (trailOn && p.tp1hit) { var tr = lg ? cl - r : cl + r; if ((lg && tr > p.sl) || (!lg && tr < p.sl)) p.sl = rnd(tr, 2); }
+          if (reached(p.tp2)) { closePos(S, p, p.tp2, 'TP2', tS); return; }
+          p.un = rnd(pnlAt(p, cl, p.vol), 2);
+        });
+        flush(S);
+        signalsAt(S, k).forEach(function (su) {
+          var g = guardian(S, su, qpEq(S), qpSpread, utc);
+          if (g.vol > 0) newPos(S, su, g.vol, g.conf, su.entry, tS, utc);
+        });
+        barT[j] = tS; eqClose[j] = qpEq(S); eqLow[j] = Math.min(S.eqMin, eqClose[j]); S.eqMin = Infinity;
+      }
+      var endP = M.c[k1], tEnd = T[M.last[k1]];
+      S.pos.slice().forEach(function (p) { closePos(S, p, endP, 'END', tEnd); }); flush(S);
+      eqClose[n5 - 1] = S.bal;
+      if (curDay) { curDay.endEq = S.bal; curDay.endBal = S.bal; days.push(curDay); }
+    } else {
+      /* ===== Asli (M1): M5 close pe signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste pe exits ===== */
+      var n1 = i1 - i0 + 1;
+      eqClose = new Float64Array(n1); eqLow = new Float64Array(n1); barT = new Float64Array(n1);
+      var pending = [];
+      var sprOf = function (q) { return (spreadFixed ? fixedPts : SP[q]) * point; };
+      // one monotone price move a → b (bid) for every open position
+      function seg(s, a, b, spr, t, gap) {
+        s.pos.slice().forEach(function (p) {
+          var lg = p.dir === 1, r = Math.abs(p.op - p.sl0);
+          var pa = lg ? a : a + spr, pb = lg ? b : b + spr; // exit-side price (BUY: bid, SELL: ask)
+          var adverse = lg ? pb < pa : pb > pa;
+          if (gap || adverse || pb === pa) {
+            if (lg ? pb <= p.sl : pb >= p.sl) { closePos(s, p, gap ? pb : p.sl, slWhy(p), t); return; }
+            if (!gap) return;
+          }
+          var hit = function (x) { return lg ? pb >= x : pb <= x; }, fillAt = function (x) { return gap ? pb : x; };
+          var evs = [];
+          if (beOn && !p.be) evs.push(['BE', p.op + (lg ? r : -r)]);
+          if (!p.tp1hit) evs.push(['TP1', p.tp1]);
+          evs.push(['TP2', p.tp2]);
+          evs.sort(function (x, y) { return lg ? x[1] - y[1] : y[1] - x[1]; });
+          for (var q = 0; q < evs.length; q++) {
+            var e = evs[q]; if (!hit(e[1])) break;
+            if (e[0] === 'BE') { if (!p.be) { p.sl = p.op; p.be = true; } }
+            else if (e[0] === 'TP1') { p.tp1hit = true; if (partOn) partial(s, p, fillAt(p.tp1)); if (!p.be) p.sl = p.op; p.be = true; }
+            else { closePos(s, p, fillAt(p.tp2), 'TP2', t); return; }
+          }
+        });
+      }
+      function slWhy(p) { return p.be && Math.abs(p.sl - p.op) < 1e-9 ? 'BE' : (p.tp1hit ? 'TRAIL' : 'SL'); }
+      function simBar(s, pts, spr, t) {
+        seg(s, pts[0], pts[0], spr, t, true); track(s, pts[0], spr);
+        for (var q = 1; q < pts.length; q++) { seg(s, pts[q - 1], pts[q], spr, t, false); track(s, pts[q], spr); }
+      }
+      for (var i = i0; i <= i1; i++) {
+        var t = T[i], utc = t - OFF, spr = sprOf(i), j = i - i0, k5 = m5of[i];
+        // previous M5 bar closed → trailing (on M5 close) + signals
+        if (i > i0 && k5 !== m5of[i - 1]) {
+          var kp = m5of[i - 1], ip = i - 1, sprP = sprOf(ip);
+          if (trailOn) S.pos.forEach(function (p) {
+            if (!p.tp1hit) return;
+            var r = Math.abs(p.op - p.sl0), cx = p.dir === 1 ? C[ip] : C[ip] + sprP, tr = p.dir === 1 ? cx - r : cx + r;
+            if ((p.dir === 1 && tr > p.sl) || (p.dir === -1 && tr < p.sl)) p.sl = tr;
+          });
+          if (kp >= warmup) pending = signalsAt(S, kp);
+        }
+        var eqOpen = S.bal + unreal(S, O[i], spr);
+        ddDayCheck(S, utc, eqOpen);
+        dayRoll(t, eqOpen, j);
+        // entries at this M1 open
+        if (pending.length) {
+          pending.forEach(function (su) {
+            var eqNow = S.bal + unreal(S, O[i], spr);
+            var g = guardian(S, su, eqNow, spr, utc);
+            if (!(g.vol > 0)) return;
+            var fill = su.dir === 1 ? O[i] + spr : O[i];
+            var okGeom = su.dir === 1 ? (fill > su.sl && fill < su.tp1) : (fill < su.sl && fill > su.tp1);
+            if (!okGeom) { veto['Fill gap'] = (veto['Fill gap'] || 0) + 1; return; }
+            newPos(S, su, g.vol, g.conf, fill, t, utc);
+          });
+          pending = [];
+        }
+        var pOLHC = [O[i], L[i], H[i], C[i]], pOHLC = [O[i], H[i], L[i], C[i]];
+        if (!S.pos.length) { /* nothing to manage */ }
+        else if (pathMode === 'worst') {
+          var s1 = deepClone(S), s2 = deepClone(S);
+          simBar(s1, pOLHC, spr, t); simBar(s2, pOHLC, spr, t);
+          var e1 = s1.bal + unreal(s1, C[i], spr), e2 = s2.bal + unreal(s2, C[i], spr);
+          S = (e1 < e2 - 1e-9 || (Math.abs(e1 - e2) <= 1e-9 && s1.eqMin <= s2.eqMin)) ? s1 : s2;
+        } else {
+          simBar(S, pathMode === 'olhc' ? pOLHC : pathMode === 'ohlc' ? pOHLC : (C[i] >= O[i] ? pOLHC : pOHLC), spr, t);
+        }
+        flush(S);
+        barT[j] = t; eqClose[j] = S.bal + unreal(S, C[i], spr); eqLow[j] = Math.min(S.eqMin, eqClose[j]); S.eqMin = Infinity;
+        if (opt.onProgress && (j & 16383) === 0) opt.onProgress(j / n1);
+      }
+      if (S.pos.length) { var sE = sprOf(i1); S.pos.slice().forEach(function (p) { closePos(S, p, exitPx(p, C[i1], sE), 'END', T[i1]); }); flush(S); eqClose[n1 - 1] = S.bal; }
+      if (curDay) { curDay.endEq = eqClose[n1 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+    }
+
+    var r = summarize({
+      startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
+      eqClose: eqClose, eqLow: eqLow, barT: barT,
+      opt: { preset: presetKey, path: isQP ? 'qp' : pathMode, spread: isQP ? '0 (QUANT PILOT)' : (spreadFixed ? 'fixed ' + fixedPts + ' pts' : 'CSV'), balance: startBal, offset: off, resetSec: resetSec },
+      strategyName: st.name, from: T[i0], to: T[i1]
+    });
+    var exits = {}; trades.forEach(function (x) { exits[x.r] = (exits[x.r] || 0) + 1; });
+    r.sweep = { exec: exec, setups: setupsN, taken: taken, veto: veto, exits: exits, tp1Hits: trades.filter(function (x) { return x.tp1; }).length,
+      tradesPerDay: days.length ? trades.length / days.length : 0, warn: warn };
+    return r;
+  }
+
   function summarize(r) {
     var peak = r.startBal, mdd = 0, mddPct = 0;
     for (var i = 0; i < r.eqClose.length; i++) {
@@ -1234,13 +1629,13 @@ var SamuEngine = (function () {
     };
   }
 
-  return { run: run, runQuad: runQuad, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
+  return { run: run, runQuad: runQuad, runSweep: runSweep, mapLevels: mapLevels, detectAt: detectAt, sweepScore: sweepScore, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.6.4';
+const APP_VERSION = 'v0.7.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1401,8 +1796,8 @@ async function parseCsv(text, onProgress) {
 
   const N = lines.length;
   const t = new Float64Array(N), o = new Float64Array(N), h = new Float64Array(N),
-        l = new Float64Array(N), c = new Float64Array(N), s = new Float32Array(N);
-  const hasSpread = map.spread != null;
+        l = new Float64Array(N), c = new Float64Array(N), s = new Float32Array(N), v = new Float32Array(N);
+  const hasSpread = map.spread != null, hasVol = map.tickvol != null;
   let n = 0, skipped = 0, maxDec = 0;
   const badSamples = [];
   const num = x => { if (x == null) return NaN; if (commaDecimal && x.indexOf(',') >= 0 && x.indexOf('.') < 0) x = x.replace(',', '.'); return +x; };
@@ -1426,6 +1821,7 @@ async function parseCsv(text, onProgress) {
     }
     t[n] = toSec(d, tm); o[n] = O; h[n] = H; l[n] = L; c[n] = C;
     s[n] = hasSpread ? (num(tk[map.spread]) || 0) : 0;
+    v[n] = hasVol ? (num(tk[map.tickvol]) || 0) : 0;
     if (n < 3000) {
       const ct = tk[map.close]; const p = ct.search(/[.,]/);
       if (p >= 0) maxDec = Math.max(maxDec, ct.length - p - 1);
@@ -1440,19 +1836,20 @@ async function parseCsv(text, onProgress) {
   for (let i = 1; i < n; i++) if (t[i] < t[i - 1]) outOfOrder++;
   let idx = null;
   if (outOfOrder) { idx = Array.from({ length: n }, (_, i) => i).sort((a, b) => t[a] - t[b]); }
-  const T = new Float64Array(n), Oo = new Float64Array(n), Hh = new Float64Array(n), Ll = new Float64Array(n), Cc = new Float64Array(n), Ss = new Float32Array(n);
+  const T = new Float64Array(n), Oo = new Float64Array(n), Hh = new Float64Array(n), Ll = new Float64Array(n), Cc = new Float64Array(n), Ss = new Float32Array(n), Vv = new Float32Array(n);
   let m = 0, dups = 0;
   for (let k = 0; k < n; k++) {
     const i = idx ? idx[k] : k;
     if (m > 0 && t[i] === T[m - 1]) { dups++; continue; }
-    T[m] = t[i]; Oo[m] = o[i]; Hh[m] = h[i]; Ll[m] = l[i]; Cc[m] = c[i]; Ss[m] = s[i]; m++;
+    T[m] = t[i]; Oo[m] = o[i]; Hh[m] = h[i]; Ll[m] = l[i]; Cc[m] = c[i]; Ss[m] = s[i]; Vv[m] = v[i]; m++;
   }
   return {
     t: T.slice(0, m), o: Oo.slice(0, m), h: Hh.slice(0, m), l: Ll.slice(0, m), c: Cc.slice(0, m),
     s: hasSpread ? Ss.slice(0, m) : null,
+    v: hasVol ? Vv.slice(0, m) : null,
     meta: {
       delimiter: delim instanceof RegExp ? 'space' : (delim === '\t' ? 'tab' : delim),
-      hasHeader, columns: map, hasSpread, skipped, badSamples, outOfOrder, dups,
+      hasHeader, columns: map, hasSpread, hasVol, skipped, badSamples, outOfOrder, dups,
       decimals: maxDec, headerLine: lines[first].slice(0, 160)
     }
   };
@@ -1597,7 +1994,7 @@ async function persistDataset() {
   if (!S.ds) return;
   try {
     const d = S.ds;
-    await DB.put('dataset', { name: d.name, size: d.size, loadedAt: d.loadedAt, meta: d.meta, t: d.t, o: d.o, h: d.h, l: d.l, c: d.c, s: d.s, offset: S.offset, point: S.point });
+    await DB.put('dataset', { name: d.name, size: d.size, loadedAt: d.loadedAt, meta: d.meta, t: d.t, o: d.o, h: d.h, l: d.l, c: d.c, s: d.s, v: d.v || null, offset: S.offset, point: S.point });
   } catch (e) { /* storage not available: app still works for this session */ }
 }
 
@@ -1713,6 +2110,7 @@ function validateStrategy(st) {
   need(st && typeof st === 'object', 'JSON object nahi hai');
   if (err.length) return { err, warn };
   if (st.schema === 'samu-strategy/2') return validateQuad(st);
+  if (st.schema === 'samu-strategy/3') return validateSweep(st);
   need(st.schema === 'samu-strategy/1', 'schema "samu-strategy/1" hona chahiye');
   need(typeof st.name === 'string' && st.name, 'name missing');
   need(pos(st.contract_size), 'contract_size > 0 chahiye');
@@ -1794,6 +2192,59 @@ function validateQuad(st) {
   warn.push('News filter abhi backtest mein model nahi hai (live EA mein hoga)');
   return { err, warn };
 }
+
+/* ---------- LIQUIDITY SWEEP (samu-strategy/3) ---------- */
+const isSweep = st => !!st && st.schema === 'samu-strategy/3';
+function validateSweep(st) {
+  const err = [], warn = [], need = (c, m) => { if (!c) err.push(m); }, pos = v => typeof v === 'number' && v > 0;
+  need(typeof st.name === 'string' && st.name, 'name missing');
+  need(pos(st.contract_size), 'contract_size > 0 chahiye');
+  need(pos(st.point), 'point > 0 chahiye');
+  need(typeof st.server_gmt_offset_hours === 'number', 'server_gmt_offset_hours number chahiye');
+  const g = st.signal || {}, k = st.risk || {};
+  ['pip_size', 'min_depth_pips', 'max_depth_pips', 'displacement_mult', 'sl_buffer_pips', 'tp1_rr', 'tp2_min_rr', 'eq_tolerance_pips', 'volume_spike_mult'].forEach(f => need(pos(g[f]), 'signal.' + f + ' > 0'));
+  need(Number.isInteger(g.confirm_candles) && g.confirm_candles > 0, 'signal.confirm_candles integer > 0');
+  need(Number.isInteger(g.body_lookback) && g.body_lookback > 0, 'signal.body_lookback integer > 0');
+  if (pos(g.min_depth_pips) && pos(g.max_depth_pips)) need(g.min_depth_pips < g.max_depth_pips, 'min depth < max depth');
+  need(pos(k.risk_pct) && pos(k.max_risk_pct) && k.risk_pct <= k.max_risk_pct, 'risk.risk_pct ≤ max_risk_pct (> 0)');
+  need(Number.isInteger(k.max_open_trades) && k.max_open_trades > 0, 'risk.max_open_trades integer > 0');
+  need(pos(k.daily_dd_kill_pct), 'risk.daily_dd_kill_pct > 0');
+  need(pos(k.spread_limit_price), 'risk.spread_limit_price > 0');
+  need(typeof k.min_confidence === 'number', 'risk.min_confidence number');
+  const b = st.basket || {};
+  need(b.presets && b.presets[b.preset], 'basket.preset "' + b.preset + '" presets mein nahi hai');
+  if (b.presets) Object.entries(b.presets).forEach(([n, p]) => need(['m1', 'qp'].includes(p.exec), 'Preset ' + n + ': exec "m1" ya "qp"'));
+  warn.push('News filter (news_hours_utc) khaali hai — backtest mein news nahi');
+  if (S.ds && !S.ds.v) warn.push('Data mein tick volume nahi hai — "volume spike" bonus nahi milega. Data dobara load karo (⬇ GitHub se Data).');
+  return { err, warn };
+}
+function summarizeSweep(st) {
+  const g = st.signal, k = st.risk, m = st.manage || {}, L = [], pip = g.pip_size;
+  L.push('Symbol <b>' + esc(st.symbol) + '</b>, M5 pe. Source: QUANT PILOT (Sumedh Kumar) ke rules, code se seedha port.');
+  L.push('<b>Levels:</b> pichhla din high/low (PDH/PDL), Asia range (00–07 UTC), 4H swing high/low (aakhri 3), M15 equal highs/lows (±' + g.eq_tolerance_pips + ' pips). Har ' + (st.levels_refresh_m5_bars || 24) + ' M5 bar (2 ghante) pe naye.');
+  L.push('<b>Sweep:</b> wick level ko <b>' + g.min_depth_pips + '–' + g.max_depth_pips + ' pips ($' + (g.min_depth_pips * pip).toFixed(1) + '–$' + (g.max_depth_pips * pip).toFixed(1) + ')</b> paar kare (pichhle 7 bar andar the), phir ' + g.confirm_candles + ' candle ke andar body ≥ ' + g.displacement_mult + '× avg (' + g.body_lookback + ' bar) ke saath close wapas andar → us close pe entry.');
+  L.push('<b>SL</b> wick + ' + g.sl_buffer_pips + ' pips ($' + (g.sl_buffer_pips * pip).toFixed(1) + '). <b>TP1</b> 1:' + g.tp1_rr + (m.partial_at_tp1 !== false ? ' (50% close)' : '') + '. <b>TP2</b> agla liquidity pool (≥ 1:' + g.tp2_min_rr + ').' + (m.breakeven_at_1r !== false ? ' 1R pe SL breakeven.' : '') + (m.trail_after_tp1 !== false ? ' TP1 ke baad trailing: M5 close − 1R.' : ''));
+  L.push('<b>Guardian:</b> risk ' + k.risk_pct + '%/trade (lot apne aap), max ' + k.max_open_trades + ' khule, din ka DD ' + k.daily_dd_kill_pct + '% → nayi entry band (UTC din), RR ≥ 1:' + k.min_rr + ', confidence ≥ ' + k.min_confidence + '/10 (rule-based score), session ' + (k.sessions || []).join(' + ') + ', level cooldown ' + k.cooldown_min + ' min, spread ≤ $' + k.spread_limit_price + '.');
+  L.push('<b>Presets:</b> ' + Object.entries(st.basket.presets).map(([n, p]) => '<b>' + esc(n) + '</b> = ' + esc(p.label || p.exec)).join(' · '));
+  return L;
+}
+const SWEEP_FORM_GROUPS = [
+  ['General', [['name', 'text', 'Naam'], ['symbol', 'text', 'Symbol'], ['contract_size', 'num', 'Contract size'], ['point', 'num', 'Point'], ['server_gmt_offset_hours', 'num', 'Server GMT offset']]],
+  ['Sweep signal', [['signal.min_depth_pips', 'num', 'Min depth (pips)', '1 pip = $0.10'], ['signal.max_depth_pips', 'num', 'Max depth (pips)'], ['signal.displacement_mult', 'num', 'Displacement × avg body'], ['signal.confirm_candles', 'num', 'Confirm candles'], ['signal.body_lookback', 'num', 'Avg body bars'], ['signal.volume_spike_mult', 'num', 'Volume spike ×'], ['signal.eq_tolerance_pips', 'num', 'Equal high/low tolerance (pips)']]],
+  ['SL / TP', [['signal.sl_buffer_pips', 'num', 'SL buffer (pips)'], ['signal.tp1_rr', 'num', 'TP1 (R)'], ['signal.tp2_min_rr', 'num', 'TP2 min (R)'], ['manage.breakeven_at_1r', 'bool', '1R pe breakeven'], ['manage.partial_at_tp1', 'bool', 'TP1 pe 50% close'], ['manage.trail_after_tp1', 'bool', 'TP1 ke baad trailing']]],
+  ['Guardian', [['risk.risk_pct', 'num', 'Risk % / trade'], ['risk.max_risk_pct', 'num', 'Max risk %'], ['risk.max_open_trades', 'num', 'Max khule trades'], ['risk.daily_dd_kill_pct', 'num', 'Daily DD kill %', 'Nayi entry band'], ['risk.min_rr', 'num', 'Min RR'], ['risk.min_confidence', 'num', 'Min confidence (1–10)'], ['risk.cooldown_min', 'num', 'Level cooldown (min)'], ['risk.spread_limit_price', 'num', 'Max spread ($)']]]
+];
+function sweepTable(r) {
+  const w = r.sweep, rows = [['Setups mile', w.setups], ['Trade liye', w.taken]].concat(Object.entries(w.veto).sort((a, b) => b[1] - a[1]).map(([k, v]) => ['Veto: ' + k, v]));
+  let h = '<tr><th>GUARDIAN</th><th>GINTI</th></tr>' + rows.map(x => '<tr><td>' + esc(x[0]) + '</td><td>' + fmtInt(x[1]) + '</td></tr>').join('');
+  h += '<tr><th>EXIT</th><th>TRADES · P/L</th></tr>';
+  Object.entries(w.exits).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+    const pr = r.trades.filter(t => t.r === k).reduce((a, t) => a + t.pr, 0);
+    h += '<tr><td>' + (REASON_NAME[k] || k) + '</td><td>' + v + ' · <span class="' + signCls(pr) + '">' + money(pr) + '</span></td></tr>';
+  });
+  h += '<tr><td>TP1 hit (50% band)</td><td>' + fmtInt(w.tp1Hits) + '</td></tr><tr><td>Trades / din</td><td>' + fmtNum(w.tradesPerDay, 2) + '</td></tr>';
+  return h;
+}
 function quadPresetText(p) {
   return 'Chalu EA: ' + (p.modules || QUAD_MODS).map(m => MOD_NAME[m] || m).join(', ');
 }
@@ -1838,12 +2289,14 @@ async function loadQuad(file) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const st = await r.json();
     setStrategy(st, 'strategies/' + file);
-    toast(st.name + ' load ho gaya');
+    if (st.default_balance && $('rBal')) { $('rBal').value = st.default_balance; saveRunSettings(); }
+    toast(st.name + ' load ho gaya' + (st.default_balance ? ' · balance $' + fmtInt(st.default_balance) : ''));
   } catch (e) { banner($('stBanners'), 'bad', 'QUAD strategy load nahi hui: ' + esc(e.message)); }
 }
 
 function presetText(p) {
   if (p && p.modules) return quadPresetText(p);
+  if (p && p.exec) return p.label || ('exec ' + p.exec);
   const parts = [];
   parts.push(p.tp_usd != null ? 'Basket +$' + p.tp_usd + ' pe sab close' : 'Fixed TP nahi');
   parts.push(p.sl_pct_balance != null ? 'SL = balance ka ' + p.sl_pct_balance + '%' : 'Basket SL nahi');
@@ -1853,6 +2306,7 @@ function presetText(p) {
 
 function summarize(st) {
   if (isQuad(st)) return summarizeQuad(st);
+  if (isSweep(st)) return summarizeSweep(st);
   const e = st.entry, g = st.grid, d = st.daily, b = st.basket, p = b.presets[b.preset];
   const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
   const L = [];
@@ -1915,6 +2369,7 @@ $('btnQuadB').onclick = () => loadQuad('quad-basket-set-b.json');
 $('btnQuadC').onclick = () => loadQuad('quad-basket-set-c.json');
 $('btnStep10').onclick = () => loadQuad('step-basket-10.json');
 $('btnStep10f').onclick = () => loadQuad('step-basket-10-fixed.json');
+$('btnSweep').onclick = () => loadQuad('liquidity-sweep-qp.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -1984,7 +2439,7 @@ function renderForm() {
   if (!st) { F.innerHTML = ''; return; }
   const pk = st.basket && st.basket.preset, P = pk && st.basket.presets ? st.basket.presets[pk] : null;
   let h = '';
-  (isQuad(st) ? QUAD_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
+  (isQuad(st) ? QUAD_FORM_GROUPS : isSweep(st) ? SWEEP_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
     if (title === 'LOTS') {
       const lots = (st.lots || []).slice().sort((a, b) => a.from - b.from);
       h += '<div class="fgrp"><div class="lbl">Lot table</div><div class="hint muted" style="font-size:11px">Basket mein trade number → lot</div>';
@@ -2061,9 +2516,9 @@ $('stForm').addEventListener('click', e => {
 });
 
 /* ===================== RUN ===================== */
-const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case' };
-const REASON_NAME = { LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
-const REASON_SHORT = { LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
+const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case', qp: 'QP (M5 close)' };
+const REASON_NAME = { BE: 'Breakeven stop', TP2: 'TP2 (liquidity pool)', LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
+const REASON_SHORT = { BE: 'BE', TP2: 'TP2', LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
 const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
 const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
 const istStr = sec => fmtSec(serverToIst(sec, S.offset));
@@ -2171,8 +2626,11 @@ function renderRun(r) {
     ['Loss days', fmtInt(r.dayLoss), 'daily −' + S.strategy.daily.loss_pct + '% hit']
   ];
   if (r.quad) stats.splice(4, 0, ['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake']);
-  $('rModCard').classList.toggle('hide', !r.quad);
+  if (r.sweep) stats.splice(6, 2, ['Trades / din', fmtNum(r.sweep.tradesPerDay, 2), r.sweep.setups + ' setups, ' + r.sweep.taken + ' liye'], ['TP1 hit', fmtInt(r.sweep.tp1Hits), '50% band + BE']);
+  $('rModCard').classList.toggle('hide', !r.quad && !r.sweep);
+  $('rModCard').querySelector('.lbl').textContent = r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
   if (r.quad) $('rMods').innerHTML = modTable(r);
+  if (r.sweep) $('rMods').innerHTML = sweepTable(r);
   $('rStats').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
   $('rReasons').innerHTML = Object.entries(r.reasons).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
     const pr = r.baskets.filter(b => b.r === k).reduce((a, b) => a + b.pr, 0);
@@ -2257,8 +2715,10 @@ function renderReport() {
   $('repTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
   $('repNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + pctS(r.netPct) + ')</span>';
   $('repMeta').textContent = fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' (server)\nbalance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset + (r.ranAt ? ' · run ' + istNow(r.ranAt) + ' IST' : '');
-  $('repModCard').classList.toggle('hide', !r.quad);
+  $('repModCard').classList.toggle('hide', !r.quad && !r.sweep);
+  $('repModCard').querySelector('.lbl').textContent = r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
   if (r.quad) $('repMods').innerHTML = modTable(r);
+  if (r.sweep) $('repMods').innerHTML = sweepTable(r);
   $('repStats').innerHTML = repStatsList(r, rep, st).map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
 
   let mh = '<tr><th>MONTH</th><th>P/L</th><th>%</th><th>DAYS G/R</th><th>BASKETS</th><th>WIN%</th><th>TGT</th><th>LOSS</th></tr>';
@@ -2417,11 +2877,14 @@ function buildHtmlReport(r, rep, st) {
     '<div class="big">' + money(r.net) + ' <span style="font-size:18px;color:#8f887a">(' + pctS(r.netPct) + ')</span></div>' +
     '<div class="m">' + fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' server · balance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset +
     ' · generated ' + istNow(Date.now()) + ' IST</div>' +
-    '<p class="m">Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.</p>' +
+    '<p class="m">' + (r.sweep ? (r.sweep.exec === 'qp' ? 'Model: QUANT PILOT ka apna backtester — M5 close pe fill, spread 0, candle mein SL pehle. Rules: docs/SWEEP-RULES.md.' : 'Model: M5 signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste (' + PATH_NAME[r.opt.path] + ') pe SL/BE/TP1/TP2, trailing M5 close pe. Slippage/swap nahi. Rules: docs/SWEEP-RULES.md.') : 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.') + '</p>' +
     '<h2>Summary</h2><div class="grid">' + stats + '</div>' +
     '<h2>Equity</h2><div class="box">' + svgLine(r.eqClose, 900, 220, '#d4af37', r.startBal) + '</div>' +
     '<h2>Drawdown %</h2><div class="box">' + svgLine(Array.from(ddSeries(r), v => -v), 900, 110, '#ff5d5d', 0, v => fmtNum(Math.abs(v), 1) + '%') + '</div>' +
     '<h2>Close reasons</h2><div>' + reasons + '</div>' +
+    (r.sweep ? '<h2>Guardian + exits (Liquidity Sweep)</h2><div class="box"><table>' + sweepTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' +
+      '<h2>Sweep trades (level · confidence)</h2><div class="box">' + T(['OPEN IST', 'DIR', 'LEVEL', 'CONF', 'LOT', 'ENTRY', 'EXIT', 'P/L', 'REASON'],
+        r.trades.slice().sort((a, b) => a.ot - b.ot).map(t => '<tr>' + td(istStr(t.ot)) + td(t.dir > 0 ? 'BUY' : 'SELL') + td(esc(t.lvl)) + td(t.conf + '/10') + td(t.lot.toFixed(2)) + td(t.op.toFixed(3)) + td(t.cp.toFixed(3)) + td(money(t.pr), cls(t.pr)) + td(REASON_SHORT[t.r] || t.r) + '</tr>')) + '</div>' : '') +
     '<h2>Mahine-wise P/L</h2><div class="box">' + T(['MONTH', 'P/L', '%', 'DAYS G/R', 'BASKETS', 'WIN%', 'TGT', 'LOSS'], months) + '</div>' +
     '<h2>Din-wise P/L (7:00 AM IST reset)</h2><div class="box">' + T(['DAY', 'START EQ', 'P/L', '%', 'BSK', 'W', 'STOP'], days) + '</div>' +
     '<h2>Baskets (' + r.baskets.length + ')</h2><div class="box">' + T(['#', 'OPEN IST', 'CLOSE IST', 'DIR', 'N', 'WORST', 'P/L', 'REASON'], baskets) + '</div>' +
@@ -2432,7 +2895,7 @@ function buildHtmlReport(r, rep, st) {
 
 /* ===================== COMPARE ===================== */
 const CMP_COLORS = ['#d4af37', '#4fc3f7', '#ef6fb0', '#7bd389', '#ff9f43', '#b39ddb', '#f06262', '#e6e6e6'];
-const PATH_SHORT = { auto: 'Auto', olhc: 'OLHC', ohlc: 'OHLC', worst: 'Worst' };
+const PATH_SHORT = { auto: 'Auto', olhc: 'OLHC', ohlc: 'OHLC', worst: 'Worst', qp: 'QP' };
 const CMP_MAX = 24;
 S.cmp = [];
 const cmpLabel = s => s.opt.preset + ' · ' + PATH_SHORT[s.opt.path] + ' · ' + (s.opt.spread === 'CSV' ? 'CSV spr' : s.opt.spread);
