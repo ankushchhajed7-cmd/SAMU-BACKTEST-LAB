@@ -32,6 +32,9 @@ ok('File name version = EA_VERSION', eaFile.includes(v + '.mq5'), v);
   try { built = JSON.parse(lits.map(x => JSON.parse('"' + x + '"')).join('')); } catch (e) {}
   ok('EA ki built-in strategy = strategies/step-basket.json', built && JSON.stringify(built) === JSON.stringify(st), built ? '' : 'parse fail');
 }
+// safety: default PAPER (no broker orders) unless the user turns live trading on
+ok('Default PAPER mode (InpLiveTrading = false)', /input bool\s+InpLiveTrading\s*=\s*false;/.test(src));
+ok('Paper path order bhejne se pehle return karta hai', /if\(Paper\(\)\)\s*\{[^}]*ArrayResize\(g_vp, k \+ 1\)[\s\S]*?return true;\s*\}[\s\S]*?trade\.Buy/.test(src));
 // source must stay ASCII (MetaEditor encoding safe)
 ok('EA source sirf ASCII', !/[^\x00-\x7F]/.test(src));
 console.log(fails ? fails + ' FAILED' : 'ALL PASS'); process.exit(fails ? 1 : 0);
