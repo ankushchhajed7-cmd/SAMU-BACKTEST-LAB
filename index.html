@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.5.1</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.6.0</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -215,6 +215,7 @@ section.scr.on{display:block}
     <div class="muted mono" id="stMeta" style="margin-top:4px"></div>
     <div class="btns">
       <button class="btn small" id="btnBuiltIn">Step Basket (built-in)</button>
+      <button class="btn small" id="btnQuad">QUAD Basket (4 EA)</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -294,6 +295,10 @@ section.scr.on{display:block}
       <div class="lbl">Basket close reasons</div>
       <div id="rReasons" style="margin-top:6px"></div>
     </div>
+    <div class="card hide" id="rModCard">
+      <div class="lbl">EA-wise P/L (QUAD)</div>
+      <div class="scroll"><table class="tbl" id="rMods"></table></div>
+    </div>
     <div class="card">
       <div class="lbl">Last 30 baskets</div>
       <div class="scroll"><table class="tbl" id="rBaskets"></table></div>
@@ -330,6 +335,12 @@ section.scr.on{display:block}
     </div>
 
     <div class="grid" id="repStats"></div>
+
+    <div class="card hide" id="repModCard">
+      <div class="lbl">EA-wise P/L (QUAD)</div>
+      <div class="scroll"><table class="tbl" id="repMods"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Kaun sa EA basket ko kama ke de raha hai aur kaun nuksaan. CAP = EA ki loss limit hit, SL = trade ka SL.</div>
+    </div>
 
     <div class="card">
       <div class="lbl">Equity</div>
@@ -414,7 +425,7 @@ section.scr.on{display:block}
 </nav>
 
 <script id="engine">
-/* ===================== SAMU ENGINE v0.4.0 =====================
+/* ===================== SAMU ENGINE v0.6.0 =====================
    Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
    (Universal EA must follow the same rules for parity). */
 var SamuEngine = (function () {
@@ -468,6 +479,7 @@ var SamuEngine = (function () {
 
   /* ---------- run ---------- */
   function run(ds, st, opt) {
+    if (st && st.schema === 'samu-strategy/2') return runQuad(ds, st, opt);
     opt = opt || {};
     var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s;
     var N = T.length;
@@ -688,6 +700,417 @@ var SamuEngine = (function () {
     });
   }
 
+  /* ---------- QUAD portfolio engine (schema samu-strategy/2) ----------
+     Rules: docs/QUAD-RULES.md. 4 modules, ek common cycle exit. */
+  function ema(c, period) {
+    var n = c.length, out = new Float64Array(n).fill(NaN), k = 2 / (period + 1), sum = 0;
+    for (var i = 0; i < n; i++) {
+      if (i < period) { sum += c[i]; if (i === period - 1) out[i] = sum / period; }
+      else out[i] = out[i - 1] + k * (c[i] - out[i - 1]);
+    }
+    return out;
+  }
+  // Bollinger: SMA ± dev × population stdev (MT5 iBands)
+  function bands(c, period, dev) {
+    var n = c.length, up = new Float64Array(n).fill(NaN), lo = new Float64Array(n).fill(NaN), mid = new Float64Array(n).fill(NaN);
+    for (var i = period - 1; i < n; i++) {
+      var s = 0, q = 0;
+      for (var j = i - period + 1; j <= i; j++) s += c[j];
+      var m = s / period;
+      for (j = i - period + 1; j <= i; j++) q += (c[j] - m) * (c[j] - m);
+      var sd = Math.sqrt(q / period);
+      mid[i] = m; up[i] = m + dev * sd; lo[i] = m - dev * sd;
+    }
+    return { mid: mid, up: up, lo: lo };
+  }
+  function deepClone(o) {
+    if (o === null || typeof o !== 'object') return o;
+    if (Array.isArray(o)) return o.map(deepClone);
+    var c = {}; for (var k in o) c[k] = deepClone(o[k]); return c;
+  }
+  var MODS = ['grid', 'marti', 'pyramid', 'breakout'];
+
+  function runQuad(ds, st, opt) {
+    opt = opt || {};
+    var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s, N = T.length;
+    var cs = st.contract_size, point = opt.point || st.point;
+    var off = (opt.offset != null ? opt.offset : st.server_gmt_offset_hours) || 0;
+    var presetKey = opt.preset || (st.basket && st.basket.preset) || 'ALL';
+    var PR = (st.basket && st.basket.presets && st.basket.presets[presetKey]) || {};
+    var Mo = st.modules || {}, on = {};
+    MODS.forEach(function (m) { on[m] = !!(Mo[m] && Mo[m].enabled !== false) && (!PR.modules || PR.modules.indexOf(m) >= 0); });
+    var G = Mo.grid || {}, MA = Mo.marti || {}, PY = Mo.pyramid || {}, BO = Mo.breakout || {};
+    var cycTp = st.exit.cycle_tp_usd, cycSl = st.exit.cycle_sl_usd || 0;
+    var dd = st.dd || {}, frzPct = dd.freeze_pct || 0, peakPct = dd.peak_pct || 0;
+    var d = st.daily || {}, dTgt = d.target_pct || 0, dLoss = d.loss_pct || 0;
+    var rp = (d.reset_time || '07:00').split(':'), resetSec = (+rp[0]) * 3600 + (+rp[1]) * 60;
+    var maxTot = st.max_total_trades || 999;
+    var comm = (st.costs && st.costs.commission_per_lot) || 0;
+    var f = st.filters || {}, maxSpPts = f.max_spread_points || 0;
+    var fri = f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time.split(':') : null;
+    var friMin = fri ? (+fri[0]) * 60 + (+fri[1]) : 0;
+    var pathMode = opt.path || 'auto';
+    var spreadFixed = opt.spreadMode === 'fixed' || !SP;
+    var fixedSpr = (opt.fixedPts != null ? opt.fixedPts : 200) * point;
+    var FS = opt.forceSignals || null; // tests: { marti: 1|-1, pyramid: 1|-1 }
+
+    // ---- indicators (resampled from M1, closed bars only) ----
+    var RS = {};
+    function ser(tf) { var s = TF[tf]; if (!s) throw new Error('timeframe galat: ' + tf); if (!RS[s]) RS[s] = resample(T, O, H, L, C, s); return RS[s]; }
+    var ptr = {};
+    function lastClosed(tf, t) {
+      var s = TF[tf], R = ser(tf), p = ptr[s] || 0;
+      while (p < R.t.length && R.t[p] + s <= t) p++;
+      ptr[s] = p; return p - 1;
+    }
+    var atrF = f.atr && f.atr.high_price ? f.atr : null, ATRS = null;
+    if (atrF) { var Ra = ser(atrF.tf); ATRS = atr(Ra.h, Ra.l, Ra.c, atrF.period, 'sma'); }
+    var MA_E, MA_B, PY_T, PY_E;
+    if (on.marti) { var Rt = ser(MA.trend_tf); MA_E = ema(Rt.c, MA.trend_ema); MA_B = bands(ser(MA.tf).c, MA.bb_period, MA.bb_dev); }
+    if (on.pyramid) { PY_T = ema(ser(PY.trend_tf).c, PY.trend_ema); PY_E = ema(ser(PY.tf).c, PY.ema); }
+    if (on.breakout) ser(BO.tf);
+    function hm(s) { var a = s.split(':'); return (+a[0]) * 60 + (+a[1]); }
+    var boFrom = on.breakout ? hm(BO.from) : 0, boTo = on.breakout ? hm(BO.to) : 0;
+    function istMin(t) { return Math.floor((((t - off * 3600 + IST) % 86400) + 86400) % 86400 / 60); }
+    function istDow(t) { return new Date((t - off * 3600 + IST) * 1000).getUTCDay(); }
+    function inWin(m, a, b) { return a <= b ? (m >= a && m <= b) : (m >= a || m <= b); }
+
+    // range
+    var i0 = 0, i1 = N - 1;
+    if (opt.from != null) while (i0 < N && T[i0] < opt.from) i0++;
+    if (opt.to != null) while (i1 >= 0 && T[i1] >= opt.to) i1--;
+    if (i1 < i0) throw new Error('Is date range mein data nahi hai');
+
+    var startBal = opt.balance || 1000;
+    var trades = [], baskets = [], dayStops = [], days = [];
+    var eqClose = new Float64Array(i1 - i0 + 1), eqLow = new Float64Array(i1 - i0 + 1), barT = new Float64Array(i1 - i0 + 1);
+
+    function freshMods() {
+      return {
+        grid: { anchor: null, step: 0, up: 0, dn: 0, stop: false },
+        marti: { dir: 0, last: 0, k: 0, stop: false, sigBar: -1 },
+        pyramid: { dir: 0, last: 0, k: 0, stop: false, sigBar: -1, dayReal: 0 },
+        breakout: { buy: null, sell: null, hour: -1, stop: false, dayReal: 0 }
+      };
+    }
+    function freshCycle(id) { return { id: id, ot: null, real: 0, n: 0, peak: -Infinity, min: 0, opened: false }; }
+    var S = {
+      bal: startBal, pos: [], A: 0, K: 0, mA: {}, mK: {}, nextTid: 1, cyc: freshCycle(1),
+      md: freshMods(), dayKey: null, dayStartEq: startBal, dayStopped: false, frozen: false,
+      peakEq: startBal, blockUntil: 0, eqMin: Infinity, ev: []
+    };
+
+    function recalc(s, spr) {
+      var A = 0, K = 0, mA = { grid: 0, marti: 0, pyramid: 0, breakout: 0 }, mK = { grid: 0, marti: 0, pyramid: 0, breakout: 0 };
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], v = p.lot * cs, a, k;
+        if (p.dir === 1) { a = v; k = -p.op * v; } else { a = -v; k = (p.op - spr) * v; }
+        k -= comm * p.lot;
+        A += a; K += k; mA[p.m] += a; mK[p.m] += k;
+      }
+      s.A = A; s.K = K; s.mA = mA; s.mK = mK;
+    }
+    function PL(s, p) { return s.pos.length ? s.A * p + s.K : 0; }
+    function mPL(s, m, p) { return s.mA[m] * p + s.mK[m]; }
+    function cnt(s, m) { var c = 0; for (var i = 0; i < s.pos.length; i++) if (s.pos[i].m === m) c++; return c; }
+
+    function openPos(s, m, dir, lot, bid, spr, t, sl) {
+      var price = dir === 1 ? bid + spr : bid;
+      if (!s.cyc.opened) { s.cyc.opened = true; s.cyc.ot = t; }
+      s.cyc.n++;
+      s.pos.push({ id: s.nextTid++, m: m, dir: dir, lot: lot, op: price, ot: t, sl: sl == null ? null : sl(price) });
+      recalc(s, spr);
+      return price;
+    }
+    function closeWhere(s, test, bid, spr, t, reason) {
+      var keep = [], tot = 0;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i];
+        if (!test(p)) { keep.push(p); continue; }
+        var cp = p.dir === 1 ? bid : bid + spr, pr = p.dir * (cp - p.op) * p.lot * cs - comm * p.lot;
+        tot += pr; s.bal += pr; s.cyc.real += pr;
+        if (p.m === 'pyramid' || p.m === 'breakout') s.md[p.m].dayReal += pr;
+        s.ev.push({ k: 'T', id: p.id, b: s.cyc.id, m: p.m, dir: p.dir, lot: p.lot, ot: p.ot, op: p.op, ct: t, cp: cp, pr: pr, r: reason });
+      }
+      s.pos = keep; recalc(s, spr);
+      return tot;
+    }
+    function resetMod(s, m) {
+      var x = s.md[m];
+      if (m === 'grid') { x.anchor = null; x.up = x.dn = 0; }
+      else if (m === 'marti' || m === 'pyramid') { x.dir = 0; x.k = 0; }
+      else { x.buy = x.sell = null; }
+    }
+    function endCycle(s, t, reason) {
+      var c = s.cyc;
+      if (c.opened) s.ev.push({ k: 'B', id: c.id, dir: 0, ot: c.ot, ct: t, n: c.n, pr: c.real, r: reason, minPL: c.min, peakPL: c.peak });
+      s.cyc = freshCycle(c.opened ? c.id + 1 : c.id);
+      MODS.forEach(function (m) { resetMod(s, m); });
+      s.blockUntil = t + 60;
+    }
+    function closeAllEnd(s, bid, spr, t, reason) {
+      closeWhere(s, function () { return true; }, bid, spr, t, reason);
+      endCycle(s, t, reason);
+    }
+    function stopDay(s, bid, spr, t, reason) {
+      closeAllEnd(s, bid, spr, t, reason);
+      s.dayStopped = true;
+      s.ev.push({ k: 'D', t: t, r: reason, day: s.dayKey });
+    }
+    function trackEq(s, p) {
+      var pl = PL(s, p), eq = s.bal + pl, cp = s.cyc.real + pl;
+      if (eq < s.eqMin) s.eqMin = eq;
+      if (eq > s.peakEq) s.peakEq = eq;
+      if (s.cyc.opened) { if (cp > s.cyc.peak) s.cyc.peak = cp; if (cp < s.cyc.min) s.cyc.min = cp; }
+    }
+    function slHit(p, bid, spr) { return p.sl != null && (p.dir === 1 ? bid <= p.sl + EPS : bid + spr >= p.sl - EPS); }
+
+    // apply every rule already true at bid p (closes first, then adds)
+    function checkAt(s, p, spr, t) {
+      for (var guard = 0; guard < 200; guard++) {
+        trackEq(s, p);
+        var n = s.pos.length, pl = PL(s, p), eq = s.bal + pl;
+        if (!s.dayStopped && (n || guard > 0)) {
+          if (dTgt && eq >= s.dayStartEq * (1 + dTgt / 100) - EPS) { stopDay(s, p, spr, t, 'DAY_TARGET'); continue; }
+          if (dLoss && eq <= s.dayStartEq * (1 - dLoss / 100) + EPS) { stopDay(s, p, spr, t, 'DAY_LOSS'); continue; }
+          if (peakPct && eq <= s.peakEq * (1 - peakPct / 100) + EPS) { stopDay(s, p, spr, t, 'PEAK_STOP'); s.peakEq = s.bal; continue; }
+        }
+        s.frozen = !!frzPct && eq <= s.dayStartEq * (1 - frzPct / 100) + EPS;
+        if (s.cyc.opened && s.cyc.real + pl >= cycTp - EPS) { closeAllEnd(s, p, spr, t, 'CYCLE_TP'); continue; }
+        if (cycSl && s.cyc.opened && s.cyc.real + pl <= -cycSl + EPS) { closeAllEnd(s, p, spr, t, 'CYCLE_SL'); continue; }
+        if (!n && !(on.breakout && (s.md.breakout.buy != null || s.md.breakout.sell != null))) return;
+        // EA-wise loss cap (GRID / MARTI: khula P/L)
+        var capped = false;
+        [['grid', G], ['marti', MA]].forEach(function (x) {
+          if (capped || !x[1].loss_cap_usd || !cnt(s, x[0])) return;
+          if (mPL(s, x[0], p) <= -x[1].loss_cap_usd + EPS) {
+            closeWhere(s, function (q) { return q.m === x[0]; }, p, spr, t, 'CAP');
+            resetMod(s, x[0]); s.md[x[0]].stop = true; capped = true;
+          }
+        });
+        if (capped) continue;
+        // SL (PYRAMID / BREAKOUT)
+        var hit = false;
+        for (var i = 0; i < s.pos.length; i++) if (slHit(s.pos[i], p, spr)) { hit = true; break; }
+        if (hit) {
+          var mods = {};
+          closeWhere(s, function (q) { if (slHit(q, p, spr)) { mods[q.m] = 1; return true; } return false; }, p, spr, t, 'SL');
+          for (var m in mods) {
+            if (!cnt(s, m)) resetMod(s, m);
+            var cap = m === 'pyramid' ? PY.day_loss_cap_usd : m === 'breakout' ? BO.day_loss_cap_usd : 0;
+            if (cap && s.md[m].dayReal <= -cap + EPS) s.md[m].stop = true;
+          }
+          continue;
+        }
+        if (s.dayStopped) return;
+        var room = s.pos.length < maxTot;
+        // BREAKOUT pending stop orders
+        var bo = s.md.breakout;
+        if (on.breakout && !bo.stop && room && !cnt(s, 'breakout') && (bo.buy != null || bo.sell != null)) {
+          var dir = 0;
+          if (bo.buy != null && p + spr >= bo.buy - EPS) dir = 1; else if (bo.sell != null && p <= bo.sell + EPS) dir = -1;
+          if (dir) {
+            bo.buy = bo.sell = null;
+            openPos(s, 'breakout', dir, BO.lot, p, spr, t, function (op) { return op - dir * BO.sl_price; });
+            continue;
+          }
+        }
+        if (!room) return;
+        // GRID levels
+        var g = s.md.grid;
+        if (on.grid && g.anchor != null && !g.stop && !s.frozen) {
+          if (g.up < G.max_per_side && p >= g.anchor + g.step * (g.up + 1) - EPS) { g.up++; openPos(s, 'grid', -1, G.lot, p, spr, t); continue; }
+          if (g.dn < G.max_per_side && p <= g.anchor - g.step * (g.dn + 1) + EPS) { g.dn++; openPos(s, 'grid', 1, G.lot, p, spr, t); continue; }
+        }
+        // MARTI levels (sirf loss wali taraf)
+        var mt = s.md.marti;
+        if (on.marti && mt.dir && !mt.stop && !s.frozen && mt.k < MA.lots.length) {
+          if ((mt.dir === 1 && p + spr <= mt.last - MA.step_price + EPS) || (mt.dir === -1 && p >= mt.last + MA.step_price - EPS)) {
+            mt.last = openPos(s, 'marti', mt.dir, MA.lots[mt.k], p, spr, t); mt.k++; continue;
+          }
+        }
+        // PYRAMID adds (sirf profit wali taraf) + SL breakeven
+        var py = s.md.pyramid;
+        if (on.pyramid && py.dir && !py.stop && py.k < PY.max_trades) {
+          if ((py.dir === 1 && p + spr >= py.last + PY.add_step_price - EPS) || (py.dir === -1 && p <= py.last - PY.add_step_price + EPS)) {
+            py.last = openPos(s, 'pyramid', py.dir, PY.lot, p, spr, t, function () { return null; }); py.k++;
+            var sumL = 0, sumV = 0, mine = s.pos.filter(function (q) { return q.m === 'pyramid'; });
+            mine.forEach(function (q) { sumL += q.lot; sumV += q.op * q.lot; });
+            var be = sumV / sumL;
+            mine.forEach(function (q) { q.sl = PY.breakeven_on_add !== false ? be : (q.sl != null ? q.sl : q.op - py.dir * PY.sl_price); });
+            continue;
+          }
+        }
+        return;
+      }
+    }
+
+    // move bid a → b, stopping at every price where a rule can fire
+    function walk(s, a, b, spr, t) {
+      for (var guard = 0; guard < 4000; guard++) {
+        checkAt(s, a, spr, t);
+        if (Math.abs(b - a) < 1e-12) return;
+        var up = b > a, best = b;
+        var cand = function (x) { if (x === x && (up ? (x > a + 1e-9 && x < best) : (x < a - 1e-9 && x > best))) best = x; };
+        var n = s.pos.length;
+        if (n && s.A !== 0) {
+          var plT = function (X) { cand((X - s.K) / s.A); };
+          if (s.cyc.opened) { plT(cycTp - s.cyc.real); if (cycSl) plT(-cycSl - s.cyc.real); }
+          if (!s.dayStopped) {
+            if (dTgt) plT(s.dayStartEq * (1 + dTgt / 100) - s.bal);
+            if (dLoss) plT(s.dayStartEq * (1 - dLoss / 100) - s.bal);
+            if (peakPct) plT(s.peakEq * (1 - peakPct / 100) - s.bal);
+            if (frzPct) plT(s.dayStartEq * (1 - frzPct / 100) - s.bal);
+          }
+        }
+        if (n) {
+          if (G.loss_cap_usd && s.mA.grid) cand((-G.loss_cap_usd - s.mK.grid) / s.mA.grid);
+          if (MA.loss_cap_usd && s.mA.marti) cand((-MA.loss_cap_usd - s.mK.marti) / s.mA.marti);
+          for (var i = 0; i < n; i++) { var q = s.pos[i]; if (q.sl != null) cand(q.dir === 1 ? q.sl : q.sl - spr); }
+        }
+        if (!s.dayStopped) {
+          var bo = s.md.breakout, g = s.md.grid, mt = s.md.marti, py = s.md.pyramid;
+          if (bo.buy != null) cand(bo.buy - spr);
+          if (bo.sell != null) cand(bo.sell);
+          if (g.anchor != null) { cand(g.anchor + g.step * (g.up + 1)); cand(g.anchor - g.step * (g.dn + 1)); }
+          if (mt.dir) cand(mt.dir === 1 ? mt.last - MA.step_price - spr : mt.last + MA.step_price);
+          if (py.dir) cand(py.dir === 1 ? py.last + PY.add_step_price - spr : py.last - PY.add_step_price);
+        }
+        trackEq(s, best);
+        a = best;
+      }
+    }
+
+    // new-bar entries (signal modules + grid start + breakout pendings)
+    function entries(s, bid, spr, t, spPts) {
+      if (s.dayStopped || t < s.blockUntil) return;
+      var spOk = !maxSpPts || spPts <= maxSpPts;
+      var dow = istDow(t), mn = istMin(t);
+      var friStop = fri && ((dow === 5 && mn >= friMin) || dow === 6 || dow === 0);
+      var atrHigh = false;
+      if (ATRS) { var ai = lastClosed(atrF.tf, t); atrHigh = ai >= 0 && ATRS[ai] > atrF.high_price; }
+      var canStart = spOk && !friStop;
+      var room = function (k) { return s.pos.length + k <= maxTot; };
+      // GRID: koi grid trade nahi → BUY + SELL turant
+      var g = s.md.grid;
+      if (on.grid && canStart && !g.stop && !s.frozen && g.anchor == null && !cnt(s, 'grid') && room(2)) {
+        g.anchor = bid; g.step = atrHigh && G.step_price_high_atr ? G.step_price_high_atr : G.step_price; g.up = g.dn = 0;
+        openPos(s, 'grid', 1, G.lot, bid, spr, t); openPos(s, 'grid', -1, G.lot, bid, spr, t);
+      }
+      // MARTI: H1 trend + M5 Bollinger touch
+      var mt = s.md.marti;
+      if (on.marti && canStart && !mt.stop && !s.frozen && !atrHigh && !mt.dir && room(1)) {
+        var sig = 0, bi = lastClosed(MA.tf, t);
+        if (FS && FS.marti) sig = FS.marti;
+        else if (bi >= 0 && bi !== mt.sigBar) {
+          var ti = lastClosed(MA.trend_tf, t), Rt = ser(MA.trend_tf), Rb = ser(MA.tf);
+          if (ti >= 0 && MA_E[ti] === MA_E[ti] && MA_B.lo[bi] === MA_B.lo[bi]) {
+            var tr = Rt.c[ti] > MA_E[ti] ? 1 : Rt.c[ti] < MA_E[ti] ? -1 : 0;
+            if (tr === 1 && Rb.l[bi] <= MA_B.lo[bi]) sig = 1;
+            else if (tr === -1 && Rb.h[bi] >= MA_B.up[bi]) sig = -1;
+          }
+        }
+        if (sig) { mt.sigBar = bi; mt.dir = sig; mt.k = 1; mt.last = openPos(s, 'marti', sig, MA.lots[0], bid, spr, t); }
+      }
+      // PYRAMID: M15 EMA trend + M5 EMA20 touch & close back
+      var py = s.md.pyramid;
+      if (on.pyramid && canStart && !py.stop && !py.dir && room(1)) {
+        var ps = 0, pi = lastClosed(PY.tf, t);
+        if (FS && FS.pyramid) ps = FS.pyramid;
+        else if (pi >= 0 && pi !== py.sigBar) {
+          var tj = lastClosed(PY.trend_tf, t), Rt2 = ser(PY.trend_tf), Rp = ser(PY.tf);
+          if (tj >= 0 && PY_T[tj] === PY_T[tj] && PY_E[pi] === PY_E[pi]) {
+            var tr2 = Rt2.c[tj] > PY_T[tj] ? 1 : Rt2.c[tj] < PY_T[tj] ? -1 : 0, e = PY_E[pi];
+            if (tr2 === 1 && Rp.l[pi] <= e && Rp.c[pi] > e) ps = 1;
+            else if (tr2 === -1 && Rp.h[pi] >= e && Rp.c[pi] < e) ps = -1;
+          }
+        }
+        if (ps) {
+          py.sigBar = pi; py.dir = ps; py.k = 1;
+          py.last = openPos(s, 'pyramid', ps, PY.lot, bid, spr, t, function (op) { return op - ps * PY.sl_price; });
+        }
+      }
+      // BREAKOUT: har naye H1 bar pe pichhle H1 ka high/low
+      var bo = s.md.breakout;
+      if (on.breakout) {
+        var hi = lastClosed(BO.tf, t), win = inWin(mn, boFrom, boTo);
+        if (!win || !canStart || bo.stop) { bo.buy = bo.sell = null; }
+        else if (hi >= 0 && hi !== bo.hour) {
+          bo.hour = hi; bo.buy = bo.sell = null;
+          var Rh = ser(BO.tf), hh = Rh.h[hi], ll = Rh.l[hi];
+          if (!cnt(s, 'breakout') && hh - ll >= (BO.min_range_price || 0) && bid + spr < hh && bid > ll) { bo.buy = hh; bo.sell = ll; }
+        }
+      }
+    }
+
+    function simBar(s, pts, spr, t, spPts) {
+      s.eqMin = Infinity;
+      checkAt(s, pts[0], spr, t);
+      entries(s, pts[0], spr, t, spPts);
+      for (var k = 1; k < pts.length; k++) walk(s, pts[k - 1], pts[k], spr, t);
+      if (pts.length === 1) checkAt(s, pts[0], spr, t);
+    }
+    function flush(s) {
+      for (var i = 0; i < s.ev.length; i++) {
+        var e = s.ev[i];
+        if (e.k === 'T') trades.push(e); else if (e.k === 'B') { e.maxN = e.n; baskets.push(e); } else dayStops.push(e);
+      }
+      s.ev = [];
+    }
+
+    var curDay = null;
+    for (var i = i0; i <= i1; i++) {
+      var t = T[i], spPts = spreadFixed ? (opt.fixedPts != null ? opt.fixedPts : 200) : SP[i];
+      var spr = spreadFixed ? fixedSpr : SP[i] * point;
+      if (S.pos.length) recalc(S, spr);
+      var dk = Math.floor((t - off * 3600 + IST - resetSec) / 86400);
+      if (dk !== S.dayKey) {
+        if (curDay) { curDay.endEq = eqClose[i - i0 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+        S.dayKey = dk; S.dayStartEq = S.bal + PL(S, O[i]); S.dayStopped = false;
+        MODS.forEach(function (m) { S.md[m].stop = false; if (S.md[m].dayReal != null) S.md[m].dayReal = 0; });
+        curDay = { key: dk, startEq: S.dayStartEq, startT: t };
+      }
+      var bull = C[i] >= O[i];
+      var pOLHC = [O[i], L[i], H[i], C[i]], pOHLC = [O[i], H[i], L[i], C[i]];
+      if (pathMode === 'worst') {
+        var s1 = deepClone(S), s2 = deepClone(S), p0 = deepClone(ptr);
+        simBar(s1, pOLHC, spr, t, spPts); ptr = p0; simBar(s2, pOHLC, spr, t, spPts);
+        var e1 = s1.bal + PL(s1, C[i]), e2 = s2.bal + PL(s2, C[i]);
+        S = (e1 < e2 - 1e-9 || (Math.abs(e1 - e2) <= 1e-9 && s1.eqMin <= s2.eqMin)) ? s1 : s2;
+      } else {
+        simBar(S, pathMode === 'olhc' ? pOLHC : pathMode === 'ohlc' ? pOHLC : (bull ? pOLHC : pOHLC), spr, t, spPts);
+      }
+      flush(S);
+      var j = i - i0;
+      barT[j] = t; eqClose[j] = S.bal + PL(S, C[i]); eqLow[j] = Math.min(S.eqMin, eqClose[j]);
+      if (opt.onProgress && (j & 16383) === 0) opt.onProgress(j / (i1 - i0 + 1));
+    }
+    if (S.pos.length || S.cyc.opened) {
+      var spE = spreadFixed ? fixedSpr : SP[i1] * point;
+      if (S.pos.length) recalc(S, spE);
+      closeAllEnd(S, C[i1], spE, T[i1], 'END'); flush(S); eqClose[i1 - i0] = S.bal;
+    }
+    if (curDay) { curDay.endEq = eqClose[i1 - i0]; curDay.endBal = S.bal; days.push(curDay); }
+
+    // EA-wise stats
+    var mods = {};
+    MODS.forEach(function (m) { mods[m] = { on: on[m], trades: 0, wins: 0, net: 0, lots: 0, cap: 0, sl: 0 }; });
+    trades.forEach(function (x) {
+      var o = mods[x.m]; o.trades++; o.net += x.pr; o.lots += x.lot; if (x.pr > 0) o.wins++;
+      if (x.r === 'CAP') o.cap++; if (x.r === 'SL') o.sl++;
+    });
+    MODS.forEach(function (m) { if (m === 'grid' || m === 'marti') { var seen = {}; trades.forEach(function (x) { if (x.m === m && x.r === 'CAP') seen[x.ct] = 1; }); mods[m].cap = Object.keys(seen).length; } });
+
+    var r = summarize({
+      startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
+      eqClose: eqClose, eqLow: eqLow, barT: barT,
+      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + (opt.fixedPts != null ? opt.fixedPts : 200) + ' pts' : 'CSV', balance: startBal, offset: off, resetSec: resetSec },
+      strategyName: st.name, from: T[i0], to: T[i1]
+    });
+    r.quad = { modules: mods, tradesPerDay: days.length ? trades.length / days.length : 0, peakStops: dayStops.filter(function (x) { return x.r === 'PEAK_STOP'; }).length };
+    return r;
+  }
+
   function summarize(r) {
     var peak = r.startBal, mdd = 0, mddPct = 0;
     for (var i = 0; i < r.eqClose.length; i++) {
@@ -780,6 +1203,7 @@ var SamuEngine = (function () {
       pf: isFinite(r.pf) ? r.pf : null, winRate: r.winRate, baskets: r.baskets.length, trades: r.trades.length,
       dayTarget: r.dayTarget, dayLoss: r.dayLoss, maxTradesInBasket: r.maxTradesInBasket,
       expectancy: s.expectancy, recovery: s.recovery, avgWin: s.avgWin, avgLoss: s.avgLoss, largestLoss: s.largestLoss,
+      tradesPerDay: rep.days.length ? r.trades.length / rep.days.length : 0,
       maxConsLosses: s.maxConsLosses, worstFloating: s.worstFloating, greenDays: s.greenDays, redDays: s.redDays,
       worstDay: s.worstDay ? s.worstDay.pl : 0, bestDay: s.bestDay ? s.bestDay.pl : 0,
       months: rep.months.map(function (m) { return { month: m.month, pl: m.pl, pct: m.pct }; }),
@@ -787,13 +1211,13 @@ var SamuEngine = (function () {
     };
   }
 
-  return { run: run, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
+  return { run: run, runQuad: runQuad, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.5.1';
+const APP_VERSION = 'v0.6.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1236,6 +1660,7 @@ function validateStrategy(st) {
   const pos = v => typeof v === 'number' && v > 0;
   need(st && typeof st === 'object', 'JSON object nahi hai');
   if (err.length) return { err, warn };
+  if (st.schema === 'samu-strategy/2') return validateQuad(st);
   need(st.schema === 'samu-strategy/1', 'schema "samu-strategy/1" hona chahiye');
   need(typeof st.name === 'string' && st.name, 'name missing');
   need(pos(st.contract_size), 'contract_size > 0 chahiye');
@@ -1274,7 +1699,97 @@ function validateStrategy(st) {
   return { err, warn };
 }
 
+
+/* ---------- QUAD (samu-strategy/2) ---------- */
+const QUAD_MODS = ['grid', 'marti', 'pyramid', 'breakout'];
+const MOD_NAME = { grid: 'GRID', marti: 'MARTI', pyramid: 'PYRAMID', breakout: 'BREAKOUT' };
+const isQuad = st => !!st && st.schema === 'samu-strategy/2';
+function validateQuad(st) {
+  const err = [], warn = [], need = (c, m) => { if (!c) err.push(m); }, pos = v => typeof v === 'number' && v > 0;
+  const TFS = /^(M1|M5|M15|M30|H1|H4|D1)$/;
+  need(st.type === 'portfolio', 'type "portfolio" hona chahiye');
+  need(typeof st.name === 'string' && st.name, 'name missing');
+  need(pos(st.contract_size), 'contract_size > 0 chahiye');
+  need(pos(st.point), 'point > 0 chahiye');
+  need(typeof st.server_gmt_offset_hours === 'number', 'server_gmt_offset_hours number chahiye');
+  need(st.exit && pos(st.exit.cycle_tp_usd), 'exit.cycle_tp_usd > 0 chahiye');
+  const M = st.modules || {};
+  need(QUAD_MODS.some(m => M[m] && M[m].enabled !== false), 'kam se kam ek EA chalu hona chahiye');
+  if (M.grid) { need(pos(M.grid.lot), 'grid.lot > 0'); need(pos(M.grid.step_price), 'grid.step_price > 0'); need(Number.isInteger(M.grid.max_per_side) && M.grid.max_per_side >= 0, 'grid.max_per_side integer'); }
+  if (M.marti) {
+    need(TFS.test(M.marti.tf || '') && TFS.test(M.marti.trend_tf || ''), 'marti.tf / trend_tf galat');
+    need(Array.isArray(M.marti.lots) && M.marti.lots.length && M.marti.lots.every(pos), 'marti.lots list (jaise 0.01, 0.02) chahiye');
+    need(pos(M.marti.step_price), 'marti.step_price > 0'); need(pos(M.marti.bb_period) && pos(M.marti.bb_dev), 'marti.bb_period / bb_dev > 0');
+  }
+  if (M.pyramid) {
+    need(TFS.test(M.pyramid.tf || '') && TFS.test(M.pyramid.trend_tf || ''), 'pyramid.tf / trend_tf galat');
+    need(pos(M.pyramid.lot) && pos(M.pyramid.sl_price) && pos(M.pyramid.add_step_price), 'pyramid lot / sl / add step > 0');
+  }
+  if (M.breakout) {
+    need(TFS.test(M.breakout.tf || ''), 'breakout.tf galat');
+    need(pos(M.breakout.lot) && pos(M.breakout.sl_price), 'breakout lot / sl > 0');
+    need(/^\d{2}:\d{2}$/.test(M.breakout.from || '') && /^\d{2}:\d{2}$/.test(M.breakout.to || ''), 'breakout from/to "HH:MM"');
+  }
+  const b = st.basket || {};
+  need(b.presets && b.presets[b.preset], 'basket.preset "' + b.preset + '" presets mein nahi hai');
+  const d = st.daily || {};
+  need(typeof d.target_pct === 'number' && typeof d.loss_pct === 'number', 'daily.target_pct / loss_pct number chahiye');
+  need(/^\d{2}:\d{2}$/.test(d.reset_time || ''), 'daily.reset_time "HH:MM" chahiye');
+  if (!d.loss_pct) warn.push('Hard stop (daily.loss_pct) off hai — DD control kamzor');
+  if (!st.exit || !st.exit.cycle_sl_usd) warn.push('Cycle SL off hai — ek cycle ka loss bina limit ke badh sakta hai');
+  if (M.grid && M.grid.enabled !== false && !M.grid.loss_cap_usd) warn.push('GRID ki loss cap off hai');
+  if (M.marti && M.marti.enabled !== false && !M.marti.loss_cap_usd) warn.push('MARTI ki loss cap off hai');
+  warn.push('News filter abhi backtest mein model nahi hai (live EA mein hoga)');
+  return { err, warn };
+}
+function quadPresetText(p) {
+  return 'Chalu EA: ' + (p.modules || QUAD_MODS).map(m => MOD_NAME[m] || m).join(', ');
+}
+function summarizeQuad(st) {
+  const M = st.modules, e = st.exit, d = st.daily, dd = st.dd || {}, f = st.filters || {}, L = [];
+  const onM = m => M[m] && M[m].enabled !== false;
+  L.push('Symbol <b>' + esc(st.symbol) + '</b>, 4 EA ek hi basket. Har EA ka alag magic (' + QUAD_MODS.map(m => MOD_NAME[m] + ' ' + (M[m] ? M[m].magic : '—')).join(', ') + ').');
+  L.push('<b>Common exit:</b> cycle ka band + khula P/L = <b>+$' + e.cycle_tp_usd + '</b> hote hi chaaro EA ke saare trades close, naya cycle agle M1 bar se.' + (e.cycle_sl_usd ? ' Cycle −$' + e.cycle_sl_usd + ' pe bhi sab close (cycle SL).' : ''));
+  if (onM('grid')) { const g = M.grid; L.push('<b>GRID:</b> koi grid trade nahi to turant BUY + SELL ' + g.lot + '. Har $' + g.step_price + ' upar SELL, har $' + g.step_price + ' neeche BUY (ATR high pe $' + g.step_price_high_atr + '), har side max ' + g.max_per_side + '. Khula loss −$' + g.loss_cap_usd + ' → GRID close, us din band.'); }
+  if (onM('marti')) { const m = M.marti; L.push('<b>MARTI:</b> ' + m.trend_tf + ' EMA ' + m.trend_ema + ' ke trend mein, ' + m.tf + ' Bollinger (' + m.bb_period + ', ' + m.bb_dev + ') touch pe entry (uptrend = sirf neeche BUY). Har $' + m.step_price + ' ulta jaane pe agla lot: ' + m.lots.join(' → ') + '. Khula loss −$' + m.loss_cap_usd + ' → MARTI close, us din band.'); }
+  if (onM('pyramid')) { const y = M.pyramid; L.push('<b>PYRAMID:</b> ' + y.trend_tf + ' EMA ' + y.trend_ema + ' trend + ' + y.tf + ' EMA ' + y.ema + ' touch karke wapas close pe entry, lot ' + y.lot + ', SL $' + y.sl_price + '. Profit mein har $' + y.add_step_price + ' pe ek aur trade (max ' + y.max_trades + ')' + (y.breakeven_on_add !== false ? ', SL breakeven (avg price) pe' : '') + '. Din ka loss −$' + y.day_loss_cap_usd + ' → us din band.'); }
+  if (onM('breakout')) { const b = M.breakout; L.push('<b>BREAKOUT:</b> ' + b.from + '–' + b.to + ' IST, har naye ' + b.tf + ' bar pe pichhle ' + b.tf + ' ka high pe Buy Stop, low pe Sell Stop (range ≥ $' + b.min_range_price + '). Ek chala to doosra delete. Lot ' + b.lot + ', SL $' + b.sl_price + '. Din ka loss −$' + b.day_loss_cap_usd + ' → us din band.'); }
+  L.push('<b>DD control:</b> equity −' + (dd.freeze_pct || 0) + '% → GRID/MARTI naye level nahi (freeze) · −' + d.loss_pct + '% → sab close, din band (hard stop) · peak se −' + (dd.peak_pct || 0) + '% → sab close (live mein PAUSE, backtest mein agle din). Daily target +' + d.target_pct + '%. Naya din ' + d.reset_time + ' IST.');
+  L.push('Max ' + st.max_total_trades + ' trades ek saath. Filters: spread ' + (f.max_spread_points ? '≤ ' + f.max_spread_points + ' pts' : 'off') + ', ATR ' + (f.atr && f.atr.high_price ? f.atr.tf + '(' + f.atr.period + ') > $' + f.atr.high_price + ' = tez market' : 'off') + ', Friday ' + (f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time + ' IST ke baad naya trade nahi' : 'off') + ', news ' + (f.news && f.news.enabled ? 'on (backtest mein nahi)' : 'off') + '.');
+  return L;
+}
+const QTF = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+const QUAD_FORM_GROUPS = [
+  ['General', [['name', 'text', 'Naam'], ['symbol', 'text', 'Symbol'], ['contract_size', 'num', 'Contract size'], ['point', 'num', 'Point'], ['server_gmt_offset_hours', 'num', 'Server GMT offset']]],
+  ['Common exit', [['exit.cycle_tp_usd', 'num', 'Cycle TP ($)', 'Band + khula P/L'], ['exit.cycle_sl_usd', 'numN', 'Cycle SL ($)', 'Khaali = off'], ['max_total_trades', 'num', 'Max trades ek saath']]],
+  ['DD control', [['dd.freeze_pct', 'num', 'Freeze %', 'GRID/MARTI naye level band'], ['daily.loss_pct', 'num', 'Hard stop %', 'Sab close, din band'], ['dd.peak_pct', 'num', 'Peak protection %', '0 = off'], ['daily.target_pct', 'num', 'Daily target %', '0 = off'], ['daily.reset_time', 'time', 'Reset time (IST)']]],
+  ['EA-1 GRID', [['modules.grid.enabled', 'bool', 'Chalu'], ['modules.grid.lot', 'num', 'Lot'], ['modules.grid.step_price', 'num', 'Step ($)'], ['modules.grid.step_price_high_atr', 'num', 'Step tez market ($)'], ['modules.grid.max_per_side', 'num', 'Max har side'], ['modules.grid.loss_cap_usd', 'numN', 'Loss cap ($)']]],
+  ['EA-2 MARTI', [['modules.marti.enabled', 'bool', 'Chalu'], ['modules.marti.lots', 'arr', 'Lots', 'Comma se: 0.01, 0.02 …'], ['modules.marti.step_price', 'num', 'Step ($)'], ['modules.marti.tf', 'sel', 'BB timeframe', '', QTF], ['modules.marti.bb_period', 'num', 'BB period'], ['modules.marti.bb_dev', 'num', 'BB deviation'], ['modules.marti.trend_tf', 'sel', 'Trend timeframe', '', QTF], ['modules.marti.trend_ema', 'num', 'Trend EMA'], ['modules.marti.loss_cap_usd', 'numN', 'Loss cap ($)']]],
+  ['EA-3 PYRAMID', [['modules.pyramid.enabled', 'bool', 'Chalu'], ['modules.pyramid.lot', 'num', 'Lot'], ['modules.pyramid.sl_price', 'num', 'SL ($)'], ['modules.pyramid.add_step_price', 'num', 'Add step ($)'], ['modules.pyramid.max_trades', 'num', 'Max trades'], ['modules.pyramid.breakeven_on_add', 'bool', 'Add pe SL breakeven'], ['modules.pyramid.tf', 'sel', 'Entry timeframe', '', QTF], ['modules.pyramid.ema', 'num', 'Entry EMA'], ['modules.pyramid.trend_tf', 'sel', 'Trend timeframe', '', QTF], ['modules.pyramid.trend_ema', 'num', 'Trend EMA'], ['modules.pyramid.day_loss_cap_usd', 'numN', 'Din ka loss cap ($)']]],
+  ['EA-4 BREAKOUT', [['modules.breakout.enabled', 'bool', 'Chalu'], ['modules.breakout.lot', 'num', 'Lot'], ['modules.breakout.sl_price', 'num', 'SL ($)'], ['modules.breakout.tf', 'sel', 'Range timeframe', '', QTF], ['modules.breakout.min_range_price', 'num', 'Min range ($)'], ['modules.breakout.from', 'time', 'From (IST)'], ['modules.breakout.to', 'time', 'To (IST)'], ['modules.breakout.day_loss_cap_usd', 'numN', 'Din ka loss cap ($)']]],
+  ['Filters', [['filters.max_spread_points', 'num', 'Max spread (points)', '0 = off · sirf nayi entry'], ['filters.atr.high_price', 'numN', 'ATR tez market ($)', 'Khaali = off'], ['filters.friday_stop.enabled', 'bool', 'Friday stop'], ['filters.friday_stop.time', 'time', 'Friday stop (IST)'], ['costs.commission_per_lot', 'num', 'Commission $/lot']]]
+];
+function modTable(r) {
+  const M = r.quad.modules, days = Math.max(1, r.days.length);
+  let h = '<tr><th>EA</th><th>TRADES</th><th>/DIN</th><th>WIN%</th><th>P/L</th><th>CAP</th><th>SL</th></tr>';
+  QUAD_MODS.forEach(m => {
+    const x = M[m]; if (!x) return;
+    h += '<tr' + (x.on ? '' : ' class="muted"') + '><td>' + MOD_NAME[m] + (x.on ? '' : ' (off)') + '</td><td>' + fmtInt(x.trades) + '</td><td>' + fmtNum(x.trades / days, 1) + '</td><td>' + (x.trades ? fmtNum(x.wins / x.trades * 100, 0) : '—') +
+      '</td><td class="' + signCls(x.net) + '">' + money(x.net) + '</td><td>' + (x.cap || '') + '</td><td>' + (x.sl || '') + '</td></tr>';
+  });
+  return h;
+}
+async function loadQuad() {
+  try {
+    const r = await fetch('strategies/quad-basket.json', { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setStrategy(await r.json(), 'strategies/quad-basket.json');
+    toast('QUAD Basket load ho gaya');
+  } catch (e) { banner($('stBanners'), 'bad', 'QUAD strategy load nahi hui: ' + esc(e.message)); }
+}
+
 function presetText(p) {
+  if (p && p.modules) return quadPresetText(p);
   const parts = [];
   parts.push(p.tp_usd != null ? 'Basket +$' + p.tp_usd + ' pe sab close' : 'Fixed TP nahi');
   parts.push(p.sl_pct_balance != null ? 'SL = balance ka ' + p.sl_pct_balance + '%' : 'Basket SL nahi');
@@ -1283,6 +1798,7 @@ function presetText(p) {
 }
 
 function summarize(st) {
+  if (isQuad(st)) return summarizeQuad(st);
   const e = st.entry, g = st.grid, d = st.daily, b = st.basket, p = b.presets[b.preset];
   const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
   const L = [];
@@ -1340,6 +1856,7 @@ async function loadBuiltIn() {
 }
 
 $('btnBuiltIn').onclick = loadBuiltIn;
+$('btnQuad').onclick = loadQuad;
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -1398,6 +1915,7 @@ function fieldHtml(path, type, label, hint, opts, val) {
   let inp;
   if (type === 'bool') inp = '<label class="tog"><input type="checkbox" data-p="' + path + '" data-t="bool"' + (val ? ' checked' : '') + '><span></span></label>';
   else if (type === 'sel') inp = '<select data-p="' + path + '" data-t="sel">' + opts.map(o => '<option' + (o === val ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+  else if (type === 'arr') inp = '<input data-p="' + path + '" data-t="arr" type="text" value="' + esc(Array.isArray(val) ? val.join(', ') : (val == null ? '' : val)) + '" style="width:150px;text-align:right">';
   else inp = '<input id="' + id + '" data-p="' + path + '" data-t="' + type + '" type="' + (type === 'text' ? 'text' : type === 'time' ? 'time' : 'number') + '" step="any" value="' + (val == null ? '' : esc(val)) + '"' + (type === 'numN' ? ' placeholder="off"' : '') + (type === 'text' ? ' style="width:150px;text-align:right"' : '') + '>';
   return '<div class="field"><div><label>' + label + '</label>' + (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>' + inp + '</div>';
 }
@@ -1407,7 +1925,7 @@ function renderForm() {
   if (!st) { F.innerHTML = ''; return; }
   const pk = st.basket && st.basket.preset, P = pk && st.basket.presets ? st.basket.presets[pk] : null;
   let h = '';
-  FORM_GROUPS.forEach(([title, fields]) => {
+  (isQuad(st) ? QUAD_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
     if (title === 'LOTS') {
       const lots = (st.lots || []).slice().sort((a, b) => a.from - b.from);
       h += '<div class="fgrp"><div class="lbl">Lot table</div><div class="hint muted" style="font-size:11px">Basket mein trade number → lot</div>';
@@ -1445,6 +1963,7 @@ $('stForm').addEventListener('change', e => {
     if (t === 'bool') v = el.checked;
     else if (t === 'num') v = el.value === '' ? 0 : +el.value;
     else if (t === 'numN') v = el.value === '' ? null : +el.value;
+    else if (t === 'arr') v = el.value.split(/[,\s]+/).filter(x => x !== '').map(Number);
     else v = el.value;
     setP(st, el.dataset.p, v);
     return formApply(false);
@@ -1484,8 +2003,8 @@ $('stForm').addEventListener('click', e => {
 
 /* ===================== RUN ===================== */
 const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case' };
-const REASON_NAME = { TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
-const REASON_SHORT = { TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
+const REASON_NAME = { CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
+const REASON_SHORT = { CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
 const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
 const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
 const istStr = sec => fmtSec(serverToIst(sec, S.offset));
@@ -1589,6 +2108,9 @@ function renderRun(r) {
     ['Target days', fmtInt(r.dayTarget), 'daily +' + S.strategy.daily.target_pct + '% hit'],
     ['Loss days', fmtInt(r.dayLoss), 'daily −' + S.strategy.daily.loss_pct + '% hit']
   ];
+  if (r.quad) stats.splice(4, 0, ['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake']);
+  $('rModCard').classList.toggle('hide', !r.quad);
+  if (r.quad) $('rMods').innerHTML = modTable(r);
   $('rStats').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
   $('rReasons').innerHTML = Object.entries(r.reasons).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
     const pr = r.baskets.filter(b => b.r === k).reduce((a, b) => a + b.pr, 0);
@@ -1596,7 +2118,7 @@ function renderRun(r) {
   }).join('') || '<span class="muted">Koi basket nahi bani.</span>';
   let h = '<tr><th>#</th><th>OPEN (IST)</th><th>DIR</th><th>TRADES</th><th>WORST</th><th>P/L</th><th>REASON</th></tr>';
   r.baskets.slice(-30).reverse().forEach(b => {
-    h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + (b.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + b.n + '</td><td class="muted">' + money(b.minPL) + '</td><td class="' + (b.pr >= 0 ? 'good' : 'badc') + '">' + money(b.pr) + '</td><td>' + (REASON_SHORT[b.r] || b.r) + '</td></tr>';
+    h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + (b.dir > 0 ? 'BUY' : b.dir < 0 ? 'SELL' : 'CYCLE') + '</td><td>' + b.n + '</td><td class="muted">' + money(b.minPL) + '</td><td class="' + (b.pr >= 0 ? 'good' : 'badc') + '">' + money(b.pr) + '</td><td>' + (REASON_SHORT[b.r] || b.r) + '</td></tr>';
   });
   $('rBaskets').innerHTML = h;
   drawEquity(r);
@@ -1662,7 +2184,7 @@ function repStatsList(r, rep, st) {
     ['Worst day', s.worstDay ? money(s.worstDay.pl) : '—', s.worstDay ? s.worstDay.date : ''],
     ['Target days', fmtInt(r.dayTarget), 'daily +' + d.target_pct + '%'],
     ['Loss days', fmtInt(r.dayLoss), 'daily −' + d.loss_pct + '%']
-  ];
+  ].concat(r.quad ? [['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake'], ['Peak stops', fmtInt(r.quad.peakStops), 'peak se DD limit']] : []);
 }
 
 function renderReport() {
@@ -1673,6 +2195,8 @@ function renderReport() {
   $('repTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
   $('repNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + pctS(r.netPct) + ')</span>';
   $('repMeta').textContent = fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' (server)\nbalance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset + (r.ranAt ? ' · run ' + istNow(r.ranAt) + ' IST' : '');
+  $('repModCard').classList.toggle('hide', !r.quad);
+  if (r.quad) $('repMods').innerHTML = modTable(r);
   $('repStats').innerHTML = repStatsList(r, rep, st).map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
 
   let mh = '<tr><th>MONTH</th><th>P/L</th><th>%</th><th>DAYS G/R</th><th>BASKETS</th><th>WIN%</th><th>TGT</th><th>LOSS</th></tr>';
@@ -1714,11 +2238,11 @@ function renderList() {
   let h;
   if (isB) {
     h = '<tr><th>#</th><th>OPEN (IST)</th><th>CLOSE</th><th>DIR</th><th>N</th><th>WORST</th><th>P/L</th><th>REASON</th></tr>';
-    slice.forEach(b => h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + istStr(b.ct).slice(11) + '</td><td>' + (b.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + b.n +
+    slice.forEach(b => h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + istStr(b.ct).slice(11) + '</td><td>' + (b.dir > 0 ? 'BUY' : b.dir < 0 ? 'SELL' : 'CYCLE') + '</td><td>' + b.n +
       '</td><td class="muted">' + money(b.minPL) + '</td><td class="' + signCls(b.pr) + '">' + money(b.pr) + '</td><td>' + (REASON_SHORT[b.r] || b.r) + '</td></tr>');
   } else {
     h = '<tr><th>#</th><th>BSK</th><th>OPEN (IST)</th><th>DIR</th><th>LOT</th><th>PRICE</th><th>CLOSE</th><th>PRICE</th><th>P/L</th><th>REASON</th></tr>';
-    slice.forEach(t => h += '<tr><td>' + t.id + '</td><td>' + t.b + '</td><td>' + istStr(t.ot).slice(5) + '</td><td>' + (t.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + t.lot.toFixed(2) + '</td><td>' + fmtNum(t.op, 3) +
+    slice.forEach(t => h += '<tr><td>' + t.id + '</td><td>' + t.b + '</td><td>' + istStr(t.ot).slice(5) + '</td><td>' + (t.m ? MOD_NAME[t.m].slice(0, 4) + ' ' : '') + (t.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + t.lot.toFixed(2) + '</td><td>' + fmtNum(t.op, 3) +
       '</td><td>' + istStr(t.ct).slice(11) + '</td><td>' + fmtNum(t.cp, 3) + '</td><td class="' + signCls(t.pr) + '">' + money(t.pr) + '</td><td>' + (REASON_SHORT[t.r] || t.r) + '</td></tr>');
   }
   if (!rows.length) h += '<tr><td colspan="10" class="muted">Kuch nahi.</td></tr>';
@@ -1780,8 +2304,8 @@ const toCsv = rows => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
 
 $('btnExpTrades').onclick = () => {
   const r = S.lastRun; if (!r) return;
-  const rows = [['id', 'basket', 'dir', 'lot', 'open_time_server', 'open_time_ist', 'open_price', 'close_time_server', 'close_time_ist', 'close_price', 'profit', 'reason']];
-  r.trades.forEach(t => rows.push([t.id, t.b, t.dir > 0 ? 'BUY' : 'SELL', t.lot, fmtSec(t.ot), istStr(t.ot), t.op.toFixed(3), fmtSec(t.ct), istStr(t.ct), t.cp.toFixed(3), t.pr.toFixed(2), t.r]));
+  const rows = [['id', 'basket', 'dir', 'lot', 'open_time_server', 'open_time_ist', 'open_price', 'close_time_server', 'close_time_ist', 'close_price', 'profit', 'reason'].concat(r.quad ? ['ea'] : [])];
+  r.trades.forEach(t => rows.push([t.id, t.b, t.dir > 0 ? 'BUY' : 'SELL', t.lot, fmtSec(t.ot), istStr(t.ot), t.op.toFixed(3), fmtSec(t.ct), istStr(t.ct), t.cp.toFixed(3), t.pr.toFixed(2), t.r].concat(r.quad ? [MOD_NAME[t.m]] : [])));
   download(fileBase(r) + '-trades.csv', toCsv(rows), 'text/csv');
 };
 $('btnExpDaily').onclick = () => {
@@ -1911,6 +2435,7 @@ const CMP_ROWS = [
   ['Loss days', s => s.dayLoss, v => v, 'low'],
   ['Baskets', s => s.baskets, v => fmtInt(v), null],
   ['Trades', s => s.trades, v => fmtInt(v), null],
+  ['Trades / din', s => s.tradesPerDay, v => v == null ? '—' : fmtNum(v, 1), null],
   ['Max trades / basket', s => s.maxTradesInBasket, v => v, null],
   ['Start balance', s => s.startBal, v => money(v), null],
   ['Range', s => s.from, (v, s) => fmtDate(s.from).slice(2) + '→' + fmtDate(s.to).slice(2), null]

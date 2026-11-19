@@ -1,0 +1,109 @@
+{
+  "schema": "samu-strategy/2",
+  "type": "portfolio",
+  "name": "QUAD Basket",
+  "version": "1.0.0",
+  "notes": "4 EA (GRID, MARTI, PYRAMID, BREAKOUT) ek hi basket. Cycle ka band + khula P/L = +$10 hote hi chaaro ke saare trades close. DD control: EA-wise loss cap, -1% freeze, -2% hard stop, peak se 4% protection.",
+
+  "symbol": "XAUUSDm",
+  "contract_size": 100,
+  "point": 0.001,
+  "server_gmt_offset_hours": 0,
+
+  "exit": {
+    "cycle_tp_usd": 10,
+    "cycle_sl_usd": 150,
+    "count": "realized_plus_floating",
+    "restart": "next_m1_bar"
+  },
+
+  "dd": {
+    "freeze_pct": 1.0,
+    "peak_pct": 4.0
+  },
+
+  "daily": {
+    "target_pct": 1.0,
+    "loss_pct": 2.0,
+    "base": "day_start_equity",
+    "reset_time": "07:00",
+    "tz": "IST",
+    "on_hit": "close_all_stop_day",
+    "open_basket_at_reset": "keep"
+  },
+
+  "max_total_trades": 20,
+
+  "modules": {
+    "grid": {
+      "enabled": true,
+      "magic": 7001,
+      "lot": 0.01,
+      "step_price": 3.0,
+      "step_price_high_atr": 5.0,
+      "max_per_side": 6,
+      "loss_cap_usd": 50
+    },
+    "marti": {
+      "enabled": true,
+      "magic": 7002,
+      "tf": "M5",
+      "bb_period": 20,
+      "bb_dev": 2.0,
+      "trend_tf": "H1",
+      "trend_ema": 50,
+      "step_price": 4.0,
+      "lots": [0.01, 0.02, 0.03, 0.04],
+      "loss_cap_usd": 60
+    },
+    "pyramid": {
+      "enabled": true,
+      "magic": 7003,
+      "tf": "M5",
+      "ema": 20,
+      "trend_tf": "M15",
+      "trend_ema": 50,
+      "lot": 0.01,
+      "add_step_price": 3.0,
+      "max_trades": 4,
+      "sl_price": 5.0,
+      "breakeven_on_add": true,
+      "day_loss_cap_usd": 40
+    },
+    "breakout": {
+      "enabled": true,
+      "magic": 7004,
+      "tf": "H1",
+      "lot": 0.02,
+      "sl_price": 5.0,
+      "min_range_price": 1.0,
+      "from": "13:30",
+      "to": "23:30",
+      "tz": "IST",
+      "day_loss_cap_usd": 40
+    }
+  },
+
+  "basket": {
+    "preset": "ALL",
+    "presets": {
+      "ALL":         { "modules": ["grid", "marti", "pyramid", "breakout"] },
+      "NO_GRID":     { "modules": ["marti", "pyramid", "breakout"] },
+      "NO_MARTI":    { "modules": ["grid", "pyramid", "breakout"] },
+      "NO_PYRAMID":  { "modules": ["grid", "marti", "breakout"] },
+      "NO_BREAKOUT": { "modules": ["grid", "marti", "pyramid"] }
+    }
+  },
+
+  "costs": {
+    "commission_per_lot": 0,
+    "swap": false
+  },
+
+  "filters": {
+    "max_spread_points": 0,
+    "atr": { "tf": "H1", "period": 14, "high_price": 15.0 },
+    "friday_stop": { "enabled": true, "time": "23:30", "tz": "IST" },
+    "news": { "enabled": false, "before_min": 30, "after_min": 30 }
+  }
+}
