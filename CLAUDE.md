@@ -15,7 +15,8 @@ Owner works only from an Android phone (GitHub web + Chrome). Read STATE.md firs
 
 ## Engine
 - Rules in docs/ENGINE-RULES.md; the Universal EA must follow the same rules.
-- Run `node tests/engine.test.js` before every push.
+- Run `node tests/engine.test.js` and `node tests/quad.test.js` before every push.
+- QUAD portfolio rules: docs/QUAD-RULES.md.
 
 ## EA standard
 - Full-screen "Gold Luxe" dashboard; EA file name = full name + version (e.g. "SAMU Universal EA v1.00.mq5").

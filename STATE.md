@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
+**v0.6.0** (branch `feature-v0.6.0`), 19 Nov 2026 — QUAD Basket (4 EA portfolio) backtest
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.0 | 19 Nov 2026 | **QUAD Basket** (`strategies/quad-basket.json`, schema `samu-strategy/2` portfolio): 4 EA — GRID (BUY+SELL, $3 levels), MARTI (H1 EMA trend + M5 Bollinger, 0.01→0.04), PYRAMID (M15 EMA trend + M5 EMA20, profit pe add, SL breakeven), BREAKOUT (H1 high/low stop orders 13:30–23:30 IST). Common exit: cycle ka band + khula P/L = +$10. DD: EA-wise caps, cycle SL $150, freeze −1%, hard stop −2%, peak −4%, max 20 trades, ATR/Friday filters. Presets = EA on/off (ALL, NO_GRID…). Run/Report pe **EA-wise P/L** table + Trades/din; Trades CSV mein `ea` column; Compare mein Trades/din. Strategy screen: **QUAD Basket (4 EA)** button + QUAD form. Rules: `docs/QUAD-RULES.md`. Tests: `tests/quad.test.js` (25) |
 | EA v1.03 | 19 Nov 2026 | **PAPER mode (default)**: `InpLiveTrading = false` → virtual positions (bid/ask se P/L, OrderCalcProfit), broker ko koi order nahi; restart-safe (GV); paper trades CSV `SAMU_UEA_paper_*.csv`; dashboard PAPER P/L + banner; purani asli trade (same magic) ho to warning. Tester mein hamesha normal orders. Ankush: is account pe sirf testing, koi asli trade nahi chahiye |
 | EA v1.02 | 19 Nov 2026 | Dashboard theek: v1.01 laptop (150% DPI, chhoti height) pe bahut chhota + overlap tha. Ab DPI factor (dpi/96) + min scale 0.8 + compact layout (info / table jagah na ho to chhupte hain), panels / bars dikhte rang. Bada number = **EA P/L** (sirf is EA: band trades since + khuli basket), $1000 / account equity hataye (Ankush: doosre EA ka +/- bhi dikh raha tha). Base > account equity ho to warning (trade nahi rokta). Buttons upar daayein |
 | EA v1.01 | 19 Nov 2026 | Purane account pe safe: **Own P/L mode** (InpOwnMode, InpAllocBalance $1000, InpAllocFrom) — daily % + basket SL sirf is EA ke trades se; **margin guard** (InpMinMarginLevel 300%); **magic clash check** (khuli + 30 din history); dashboard pe EA equity, account equity, margin level. Ankush: VPS pe nayi account ki jagah nahi → purane $1000 account pe lagayenge |
@@ -27,6 +28,9 @@
 | `manifest.json` | PWA install info |
 | `sw.js` | Offline cache (network-first, cache fallback) |
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
+| `strategies/quad-basket.json` | QUAD Basket 4-EA portfolio (schema `samu-strategy/2`) |
+| `docs/QUAD-RULES.md` | QUAD engine ke exact rules (4 EA + TESTER EA parity) |
+| `tests/quad.test.js` | QUAD engine tests (`node tests/quad.test.js`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
 | `ea/SAMU Universal EA v1.03.mq5` | Universal EA |
@@ -72,7 +76,18 @@
 12. (v0.2.0) Max DD = floating equity (bar ke low tak) pe, closed-equity peak se
 13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
+## Decisions (QUAD Basket, 19 Nov 2026)
+1. 4 alag EA, ek common exit: cycle ka **band + khula** P/L = +$10 → chaaro ke saare trades close (Ankush: closed trades bhi gine jaayein)
+2. Symbol XAUUSDm, account $10,000. DD control sabse pehli priority, trades din bhar aate rahein (target 30+/din)
+3. EA set Claude ne final kiya: GRID + trend-filtered MARTI + PYRAMID (anti-martingale) + H1 BREAKOUT — har market mein kam se kam 2 EA profit mein
+4. Cycle SL $150 jodha (v0.6.0): bina iske SL/CAP ka loss cycle mein jamta rehta tha aur cycle din bhar khinchta tha
+5. Build ka kram: pehle Lab mein backtest; achha result aaye tabhi 4 live EA + QUAD TESTER EA (PAPER mode default)
+6. Synthetic random data pe QUAD loss deta hai (spread ka kharcha) — asli faisla sirf asli XAUUSDm M1 data se
+
 ## Pending / next
+- [ ] **v0.6.1: "Data lao" — GitHub Actions se XAUUSDm M1 (6 mahine) apne aap repo mein, app ek tap mein load** (Ankush ne Option B final kiya)
+- [ ] QUAD ka asli data pe backtest (Auto + Worst-case, phir NO_GRID/NO_MARTI/… compare)
+- [ ] Achha result → 4 live EA (GRID/MARTI/PYRAMID/BREAKOUT) + SAMU QUAD TESTER, naya repo SAMU-QUAD-BASKET
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
 - [x] `feature-ea-v1.03` main mein merge (19 Nov, Ankush ke kehne par; v1.02 bhi isi mein)
 - [ ] **EA v1.03 compile (VPS Helper → COPY tab) + PAPER dashboard screenshot** — error aaye to v1.04
