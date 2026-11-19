@@ -1,0 +1,60 @@
+{
+  "schema": "samu-strategy/3",
+  "type": "sweep",
+  "name": "Liquidity Sweep (QUANT PILOT)",
+  "version": "1.0.0",
+  "source": "github.com/sumedhkumar/sumedhkumarQP (Sumedh Kumar, 15 Nov 2026) — backend/core/strategy.py, risk.py, paper_engine.py",
+  "notes": "Stop-hunt reversal, XAUUSD. M5 pe levels: PDH/PDL, Asia range (00–07 UTC), 4H swings, equal highs/lows (M15). Wick level ko 10–25 pips ($1.0–$2.5) paar kare aur 3 candle ke andar body ≥ 1.2× avg ke saath close wapas andar → entry. SL wick + 5 pips, TP1 1:2 (50% close + BE), TP2 agla liquidity pool (≥ 1:3), TP1 ke baad trailing (close − 1R). Risk 1%/trade, max 2 open, daily DD 4% pe nayi entry band, sirf London/NY, confidence ≥ 7, level cooldown 30 min.",
+  "symbol": "XAUUSDm",
+  "contract_size": 100,
+  "point": 0.001,
+  "server_gmt_offset_hours": 0,
+  "default_balance": 10000,
+  "lot_min": 0.01,
+  "lot_step": 0.01,
+  "lot_max": 50,
+  "warmup_m5_bars": 300,
+  "levels_refresh_m5_bars": 24,
+  "signal": {
+    "tf": "M5",
+    "pip_size": 0.1,
+    "min_depth_pips": 10,
+    "max_depth_pips": 25,
+    "displacement_mult": 1.2,
+    "confirm_candles": 3,
+    "sl_buffer_pips": 5,
+    "tp1_rr": 2,
+    "tp2_min_rr": 3,
+    "body_lookback": 20,
+    "volume_spike_mult": 1.5,
+    "eq_tolerance_pips": 3
+  },
+  "risk": {
+    "risk_pct": 1,
+    "max_risk_pct": 2,
+    "daily_dd_kill_pct": 4,
+    "max_open_trades": 2,
+    "min_rr": 2,
+    "min_confidence": 7,
+    "sessions": ["LONDON", "NEW_YORK"],
+    "cooldown_min": 30,
+    "spread_limit_price": 0.35,
+    "news_hours_utc": []
+  },
+  "manage": {
+    "breakeven_at_1r": true,
+    "partial_at_tp1": true,
+    "trail_after_tp1": true
+  },
+  "basket": {
+    "preset": "REAL",
+    "presets": {
+      "REAL": { "exec": "m1", "label": "Asli: M5 signal → agle M1 open pe fill, CSV spread, M1 raaste pe SL/TP" },
+      "QP": { "exec": "qp", "label": "QUANT PILOT ka apna backtester (M5 close pe fill, spread 0)" },
+      "REAL_ALLDAY": { "exec": "m1", "session_filter": false, "label": "Asli, session filter off (Asia bhi)" },
+      "REAL_CONF6": { "exec": "m1", "min_confidence": 6, "label": "Asli, confidence ≥ 6" }
+    }
+  },
+  "daily": { "reset_time": "07:00", "tz": "IST", "target_pct": 0, "loss_pct": 0 },
+  "costs": { "commission_per_lot": 0, "swap": false }
+}
