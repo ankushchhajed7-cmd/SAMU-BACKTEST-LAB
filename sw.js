@@ -1,5 +1,5 @@
 /* SAMU Backtest Lab service worker — offline cache */
-const VERSION = 'v0.5.0';
+const VERSION = 'v0.5.1';
 const CACHE = 'samu-lab-' + VERSION;
 const ASSETS = [
   './',
@@ -27,7 +27,8 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
-    fetch(req)
+    // no-cache: browser ka HTTP cache bypass, taaki GitHub Pages ka naya version turant mile
+    (req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache' }) : fetch(req, { cache: 'no-cache' }))
       .then(res => {
         if (res && res.ok) {
           const copy = res.clone();
