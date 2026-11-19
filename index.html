@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.6.3</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.6.4</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -224,6 +224,8 @@ section.scr.on{display:block}
       <button class="btn small" id="btnQuad">QUAD Basket (4 EA)</button>
       <button class="btn small" id="btnQuadB">QUAD Set B</button>
       <button class="btn small" id="btnQuadC">QUAD Set C</button>
+      <button class="btn small" id="btnStep10">Step $10 (lot table)</button>
+      <button class="btn small" id="btnStep10f">Step $10 (0.01)</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -506,6 +508,8 @@ var SamuEngine = (function () {
     var comm = (st.costs && st.costs.commission_per_lot) || 0;
     var f = st.filters || {}, maxSpPts = f.max_spread_points || 0;
     var tf = f.time && f.time.enabled ? f.time : null;
+    var fri1 = f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time.split(':') : null;
+    var friMin1 = fri1 ? (+fri1[0]) * 60 + (+fri1[1]) : 0;
     var lots = st.lots.slice().sort(function (a, b) { return a.from - b.from; });
     function lotFor(k) { for (var i = 0; i < lots.length; i++) if (k >= lots[i].from && k <= lots[i].to) return lots[i].lot; return lots[lots.length - 1].lot; }
     var pathMode = opt.path || 'auto';
@@ -649,10 +653,15 @@ var SamuEngine = (function () {
       return fa <= fb ? (m >= fa && m <= fb) : (m >= fa || m <= fb);
     }
 
+    function friOk(t) {          // Friday stop (IST): uske baad (aur Sat/Sun) nayi basket nahi
+      if (!fri1) return true;
+      var x = t - off * 3600 + IST, dow = new Date(x * 1000).getUTCDay(), m = Math.floor(((x % 86400) + 86400) % 86400 / 60);
+      return !((dow === 5 && m >= friMin1) || dow === 6 || dow === 0);
+    }
     function simBar(s, pts, spr, t, sig, spPts) {
       s.eqMin = Infinity;
       checkAt(s, pts[0], spr, t);
-      if (!s.pos.length && !s.dayStopped && sig && (!maxSpPts || spPts <= maxSpPts) && timeOk(t)) {
+      if (!s.pos.length && !s.dayStopped && sig && (!maxSpPts || spPts <= maxSpPts) && timeOk(t) && friOk(t)) {
         s.bId++; s.bOpenT = t; s.bStartBal = s.bal; s.peak = -Infinity; s.bMin = 0; s.maxN = 0;
         s.firstDir = sig; s.tpOn = tp1 != null;
         openPos(s, sig, pts[0], spr, t);
@@ -1231,7 +1240,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.6.3';
+const APP_VERSION = 'v0.6.4';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1856,7 +1865,7 @@ function summarize(st) {
   L.push('Daily target <b>' + d.target_pct + '%</b>, daily loss <b>' + d.loss_pct + '%</b> (day-start equity). Hit hote hi sab close, din band. Naya din <b>' + d.reset_time + ' ' + d.tz + '</b>' + (d.open_basket_at_reset === 'keep' ? '; reset pe khuli basket chalti rahegi.' : '.'));
   L.push('Costs: commission $' + st.costs.commission_per_lot + '/lot, swap ' + (st.costs.swap ? 'on' : 'off') + '.');
   const f = st.filters || {};
-  L.push('Filters: spread ' + (f.max_spread_points ? '≤ ' + f.max_spread_points + ' pts' : 'off') + ', time ' + (f.time && f.time.enabled ? f.time.from + '–' + f.time.to + ' ' + f.time.tz : 'off') + ', news ' + (f.news && f.news.enabled ? 'on' : 'off') + '.');
+  L.push('Filters: spread ' + (f.max_spread_points ? '≤ ' + f.max_spread_points + ' pts' : 'off') + ', time ' + (f.time && f.time.enabled ? f.time.from + '–' + f.time.to + ' ' + f.time.tz : 'off') + ', Friday ' + (f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time + ' IST ke baad nayi basket nahi' : 'off') + ', news ' + (f.news && f.news.enabled ? 'on (backtest mein nahi)' : 'off') + '.');
   return L;
 }
 
@@ -1904,6 +1913,8 @@ $('btnBuiltIn').onclick = loadBuiltIn;
 $('btnQuad').onclick = () => loadQuad('quad-basket.json');
 $('btnQuadB').onclick = () => loadQuad('quad-basket-set-b.json');
 $('btnQuadC').onclick = () => loadQuad('quad-basket-set-c.json');
+$('btnStep10').onclick = () => loadQuad('step-basket-10.json');
+$('btnStep10f').onclick = () => loadQuad('step-basket-10-fixed.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -1954,7 +1965,8 @@ const FORM_GROUPS = [
     ['costs.commission_per_lot', 'num', 'Commission $/lot', 'Round-turn'],
     ['filters.max_spread_points', 'num', 'Max spread (points)', '0 = off · sirf nayi basket pe'],
     ['filters.time.enabled', 'bool', 'Time filter', 'Sirf nayi basket pe'],
-    ['filters.time.from', 'time', 'From (IST)'], ['filters.time.to', 'time', 'To (IST)']]]
+    ['filters.time.from', 'time', 'From (IST)'], ['filters.time.to', 'time', 'To (IST)'],
+    ['filters.friday_stop.enabled', 'bool', 'Friday stop', 'Uske baad nayi basket nahi'], ['filters.friday_stop.time', 'time', 'Friday stop (IST)']]]
 ];
 
 function fieldHtml(path, type, label, hint, opts, val) {
@@ -2064,7 +2076,10 @@ function renderRunReady() {
   const r = isReady();
   $('runReady').innerHTML = '<span class="' + (r.okD ? 'good' : 'badc') + '">' + (r.okD ? '✓' : '✗') + ' Data' + (S.ds ? ' (' + fmtInt(S.ds.t.length) + ' bars)' : '') + '</span> &nbsp; ' +
     '<span class="' + (r.okS ? 'good' : 'badc') + '">' + (r.okS ? '✓' : '✗') + ' Strategy' + (S.strategy ? ' (' + esc(S.strategy.name) + ')' : '') + '</span>';
-  const sel = $('rPreset'), cur = sel.value || (S.strategy && S.strategy.basket.preset);
+  // nayi strategy load hui → uska apna preset (pichhli strategy ka chuna hua preset nahi)
+  const stKey = S.strategy ? S.strategy.name + '|' + S.stratSource : '';
+  const fresh = stKey !== S._presetKey; S._presetKey = stKey;
+  const sel = $('rPreset'), cur = (fresh && S.strategy && S.strategy.basket.preset) || sel.value || (S.strategy && S.strategy.basket.preset);
   sel.innerHTML = '';
   if (S.strategy && S.strategy.basket && S.strategy.basket.presets) Object.keys(S.strategy.basket.presets).forEach(k => {
     const o = document.createElement('option'); o.value = k; o.textContent = k; sel.appendChild(o);

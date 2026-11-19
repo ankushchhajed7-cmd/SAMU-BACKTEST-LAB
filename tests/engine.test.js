@@ -105,4 +105,10 @@ ok('Balance change = sum of trade profits', Math.abs(sum - rw.net) < 1e-6);
   ok('Snapshot: ≤ 100 points, months sum = net', sn.eq.length <= 100 && Math.abs(sn.months.reduce((a, m) => a + m.pl, 0) - r.net) < 1e-6, sn.eq.length + ' pts');
   ok('Snapshot: min of eqLow ≤ min equity', Math.min(...sn.eqLow) <= Math.min(...r.eqClose) + 1e-9);
 }
+// Friday stop: Fri 3 Jul 2026 08:40 server = 14:10 IST → nayi basket nahi
+{ const s2 = S('A'); s2.filters.friday_stop = { enabled: true, time: '14:00', tz: 'IST' };
+  const rf = E.run(ds([100, 101, 102], Date.UTC(2026,6,3,8,40)/1000), s2, { forceSignal: 1, spreadMode: 'fixed', fixedPts: 0, balance: 1000, path: 'olhc' });
+  const rt = E.run(ds([100, 101, 102], Date.UTC(2026,6,3,8,20)/1000), s2, { forceSignal: 1, spreadMode: 'fixed', fixedPts: 0, balance: 1000, path: 'olhc' });
+  ok('Friday stop: 14:00 IST ke baad nayi basket nahi, pehle haan', rf.trades.length === 0 && rt.trades.length > 0, rf.trades.length + ' / ' + rt.trades.length); }
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS'); process.exit(fails ? 1 : 0);

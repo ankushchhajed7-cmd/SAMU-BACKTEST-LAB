@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.3** (branch `feature-v0.6.3`), 19 Nov 2026 — QUAD Set C (Ankush ki Sheet settings)
+**v0.6.4** (branch `feature-v0.6.4`), 19 Nov 2026 — Step Basket $10 + Friday stop
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.4 | 19 Nov 2026 | **Step Basket $10** (`strategies/step-basket-10.json` lot table, `step-basket-10-fixed.json` 0.01): pehla trade Supertrend, koi TP nahi, $5 step (neeche SELL / upar BUY), basket +$10, basket SL 5%, daily target 1%, max 20 trades. Step Basket engine mein **Friday stop** (`filters.friday_stop`, IST) + test + form fields. Buttons **Step $10 (lot table)** / **Step $10 (0.01)**. Fix: nayi strategy load hone par RUN ka preset us strategy ka apna (pehle pichhli strategy ka B reh jaata tha) |
 | v0.6.3 | 19 Nov 2026 | `strategies/quad-basket-set-c.json` + **QUAD Set C** button. Settings Ankush ne Sheet "QUAD Set B — Settings + aapke badlav" (claude.ai artifact) ke peele column mein bhari |
 | v0.6.2 | 19 Nov 2026 | **GRID lock** (`modules.grid.lock_close`, default on): dono side max level bhar jaayein to GRID close (`LOCK`) — pehle hedge mein phans kar mahino atka rehta tha (Set B ka pehla +5% isi bug ki wajah se nakli tha). Naya **`strategies/quad-basket-set-b.json`** + Strategy screen pe **QUAD Set B** button. Form mein "Lock pe close". 2 naye tests |
 | v0.6.1 | 19 Nov 2026 | DATA screen pe **⬇ GitHub se Data**: INVESTOR-ID repo ke `data/m1/<SYMBOL>_M1.json` + `.csv.gz` (raw.githubusercontent, gzip → DecompressionStream) → wahi CSV loader; server GMT offset meta se apne aap. Data INVESTOR-ID v1.13 ka **Scan → 📥 M1 Data lao** banata hai (GitHub Actions + MT5 investor login). Symbol yaad rehta hai |
@@ -87,7 +88,17 @@
 5. Build ka kram: pehle Lab mein backtest; achha result aaye tabhi 4 live EA + QUAD TESTER EA (PAPER mode default)
 6. Synthetic random data pe QUAD loss deta hai (spread ka kharcha) — asli faisla sirf asli XAUUSDm M1 data se
 
+## Step Basket $10 (19 Nov 2026, Ankush ka naya rule)
+- Rules: pehla trade (Supertrend M15 direction), $5 neeche → SELL, aur neeche → SELL…; upar wale se $5 upar → BUY. Koi alag TP nahi, sirf basket +$10. Daily target 1% ($10k), basket SL 5%, Friday 14:00 IST ke baad nayi basket nahi, news time avoid (backtest mein news nahi)
+- 1 mahina (19 Oct–19 Nov), $10k, Exness CSV spread:
+  - **Lot table (0.01×3, 0.02×3, 0.03×3, 0.04 aage), max 20: +$1,111 (+11.1%), DD 4.4%, 147 basket, 97% jeet, 22 trades/din, basket SL 0 baar, 11 target din.** Worst-case same. Spread 300/400 pe bhi +10%
+  - 0.01 fixed: −$142 (−1.4%), DD 6.4% — ek basket SL −$510 (6 Nov) ne 1 mahine ki kamai kha li
+  - TP $20 (0.01): +6.7% (1 mahina) lekin 101 din −24.9% → nahi
+- Lot table, poore 101 din: **+$1,138 (+11.4%)**, DD 6.8%, PF 1.36, 4 basket SL (−$500 ke aaspaas) + 1 daily loss; mahine: 10 Aug–10 Sep −3.2%, 10 Sep–10 Oct +6.6%, 10 Oct–19 Nov +11.9%. Raaste (O→L→H→C / O→H→L→C / Worst) pe bhi +11% se +18%
+- Dhyan: sirf 3 mahine ka data; ek basket SL = ~5% ($500). Agla kadam: Universal EA mein Friday stop + PAPER test
+
 ## Pending / next
+- [ ] Universal EA: `filters.friday_stop` support (Step $10 ko VPS pe PAPER chalane ke liye)
 - [x] v0.6.1 "GitHub se Data" (INVESTOR-ID v1.13 M1 export) — INVESTOR-ID PR #28 merge + pehla asli run baaki
 - [x] QUAD ka pehla asli backtest (19 Nov 2026): Exness-MT5Trial17 XAUUSDm M1, 100,000 bars = 10 Aug → 19 Nov 2026 (101 din; MT5 maxbars 100k pe ruka), $10,000, CSV spread (median 240 pts):
   - ALL Auto: **−$1,561 (−15.6%)**, max DD 16.8%, PF 0.66, 53 trades/din, 296 cycle TP (+$10) vs 24 cycle SL (−$150) + 6 peak stop; 35 green / 52 red din; har mahina minus (Sep ~0)
