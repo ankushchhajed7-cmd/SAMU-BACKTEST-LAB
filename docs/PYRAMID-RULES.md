@@ -38,3 +38,12 @@ Flat override keys: `lot`, `step_price`, `max_adds`, `trail_gap_price`, `tp_usd`
 
 ## Dhyan
 Step $2–3 gold ke ek M1 candle ($2–4) ke andar aa jaata hai, isliye result intrabar raaste par bahut badalta hai. Step ≥ $8 pe raasta lagbhag farq nahi daalta. Faisla hamesha Worst-case dekh ke.
+
+## EA: `ea/Trend Pyramid Grid v1.00.mq5`
+- Upar ke saare rules, same check order. Defaults = `strategies/trend-pyramid-10k.json` preset COMBO_10 ($10,000, lot 0.03, step $10, loss grid 2, TP $45, recover $9, max loss −$60, daily +$90 / −$120). `tests/pyramid-ea.test.js` ye match check karta hai.
+- Settings JSON se nahi, **inputs** se (MT5 inputs window). Preset badalna = inputs badalna (jaise PURE_10: Loss levels 0, step 10).
+- **PAPER default** (`InpLiveTrading = false`): virtual trades, broker ko order nahi, restart-safe (Global Variables), CSV `TPG_paper_<symbol>_<magic>.csv`. Strategy Tester mein hamesha normal orders.
+- Live: `InpBrokerSL` = basket SL broker pe bhi (safety). Own P/L mode (base `InpAllocBalance`), margin guard 300%, magic clash check (comment `TPG#`).
+- Live mein alag: asli tick prices (app = M1 ke 4 points), swap, slippage. EMA history `InpTrendBars` (1500 H1) se → Lab se same.
+- Attach karte hi pehle tick pe trend ki side basket (wait nahi), agar trend/ATR ready, din band nahi, Friday block nahi, news clear.
+- Full-screen Gold Luxe dashboard: EA P/L, alert banner, TREND (EMA values) / BASKET (adds, grid, SL) / TODAY / CYCLE (next add, next grid) cards, TARGET / DD OF LIMIT / BASKET MAX LOSS bars, info line, trade table, PAUSE + CLOSE ALL.
