@@ -101,6 +101,18 @@ section.scr.on{display:block}
 .soon{text-align:center;padding:30px 12px}
 .soon .big{font-size:30px}
 .hide{display:none!important}
+.fgrp{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.fgrp>.lbl{color:var(--gold2);margin-bottom:2px}
+.field select{width:auto}
+.tog{position:relative;width:46px;height:26px;flex:none}
+.tog input{opacity:0;width:0;height:0}
+.tog span{position:absolute;inset:0;border:1px solid var(--golddim);border-radius:14px;transition:.15s}
+.tog span:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:var(--mut);transition:.15s}
+.tog input:checked+span{background:#2a2008;border-color:var(--gold)}
+.tog input:checked+span:before{transform:translateX(20px);background:var(--gold)}
+.lotrow{display:flex;gap:6px;align-items:center;padding:4px 0}
+.lotrow input{width:64px;text-align:right}
+.lotrow .x{margin-left:auto}
 #cmpTbl td:first-child,#cmpTbl th:first-child,#cmpMonths td:first-child,#cmpMonths th:first-child{position:sticky;left:0;background:var(--panel);z-index:1}
 </style>
 </head>
@@ -110,7 +122,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.4.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.5.0</small></h1>
     </div>
     <div class="clocks">
       IST <b id="clkIst">--:--:--</b><br>
@@ -212,6 +224,12 @@ section.scr.on{display:block}
   </div>
 
   <div id="stBanners"></div>
+
+  <div class="card" id="formCard">
+    <div class="lbl">Settings (form)</div>
+    <div class="muted" style="font-size:12px;margin:4px 0 2px">Koi bhi value badlo, turant apply hoti hai. Khaali = off.</div>
+    <div id="stForm"></div>
+  </div>
 
   <div class="card">
     <div class="lbl">Rules (saaf bhasha mein)</div>
@@ -771,7 +789,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.4.0';
+const APP_VERSION = 'v0.5.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1277,10 +1295,11 @@ function summarize(st) {
   return L;
 }
 
-function setStrategy(st, source, keepText) {
+function setStrategy(st, source, keepText, fromForm) {
   S.strategy = st; S.stratSource = source;
   lsSet('samu.strategy', JSON.stringify(st));
   renderStrategy(keepText);
+  if (!fromForm && typeof renderForm === 'function') renderForm();
   if (S.ds) refreshStats();
   if (typeof renderRunReady === 'function' && $('rPreset')) try { renderRunReady(); } catch (e) {}
 }
@@ -1337,6 +1356,127 @@ $('btnApplyJson').onclick = () => {
 $('btnFormatJson').onclick = () => {
   try { $('stText').value = JSON.stringify(JSON.parse($('stText').value), null, 2); } catch (e) { alert('JSON galat: ' + e.message); }
 };
+
+/* ===================== STRATEGY FORM ===================== */
+const getP = (o, p) => p.split('.').reduce((a, k) => a == null ? undefined : a[k], o);
+function setP(o, p, v) { const ks = p.split('.'); let a = o; for (let i = 0; i < ks.length - 1; i++) { if (a[ks[i]] == null || typeof a[ks[i]] !== 'object') a[ks[i]] = {}; a = a[ks[i]]; } a[ks[ks.length - 1]] = v; }
+const TF_OPTS = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+// [path, type, label, hint, options]   type: text | num | numN (khaali = off) | bool | sel | time
+const FORM_GROUPS = [
+  ['General', [
+    ['name', 'text', 'Naam'], ['version', 'text', 'Version'], ['symbol', 'text', 'Symbol', 'jaise XAUUSDm'],
+    ['contract_size', 'num', 'Contract size', '100 → 0.01 lot pe $1 move = $1'], ['point', 'num', 'Point', 'XAUUSDm = 0.001'],
+    ['server_gmt_offset_hours', 'num', 'Server GMT offset', 'Exness = 0']]],
+  ['Entry · Supertrend', [
+    ['entry.tf', 'sel', 'Timeframe', '', TF_OPTS], ['entry.atr_period', 'num', 'ATR period'], ['entry.multiplier', 'num', 'Multiplier'],
+    ['entry.atr_method', 'sel', 'ATR method', 'SMA = MT5 iATR · RMA = TradingView', ['sma', 'rma']],
+    ['entry.use_closed_bar', 'bool', 'Closed bar se signal', 'Off = live bar (repaint)'], ['entry.warmup_bars', 'num', 'Warmup bars', 'Shuru ke itne bars pe trade nahi']]],
+  ['Pehla trade', [
+    ['first_trade.tp_price', 'numN', 'TP (price $)', 'Khaali = TP nahi'],
+    ['first_trade.grid_same_side_while_tp', 'bool', 'TP ke saath same-side grid', 'Off (default) = TP hi kaam karega']]],
+  ['Grid', [
+    ['grid.step_price', 'num', 'Step (price $)'], ['grid.max_trades', 'num', 'Max trades'],
+    ['grid.sell_below_lowest', 'bool', 'Neeche SELL'], ['grid.buy_above_highest', 'bool', 'Upar BUY']]],
+  ['LOTS'],
+  ['PRESET'],
+  ['Daily', [
+    ['daily.target_pct', 'num', 'Target %', '0 = off'], ['daily.loss_pct', 'num', 'Loss %', '0 = off'],
+    ['daily.reset_time', 'time', 'Reset time (IST)']]],
+  ['Costs & filters', [
+    ['costs.commission_per_lot', 'num', 'Commission $/lot', 'Round-turn'],
+    ['filters.max_spread_points', 'num', 'Max spread (points)', '0 = off · sirf nayi basket pe'],
+    ['filters.time.enabled', 'bool', 'Time filter', 'Sirf nayi basket pe'],
+    ['filters.time.from', 'time', 'From (IST)'], ['filters.time.to', 'time', 'To (IST)']]]
+];
+
+function fieldHtml(path, type, label, hint, opts, val) {
+  const id = 'f_' + path.replace(/\W/g, '_');
+  let inp;
+  if (type === 'bool') inp = '<label class="tog"><input type="checkbox" data-p="' + path + '" data-t="bool"' + (val ? ' checked' : '') + '><span></span></label>';
+  else if (type === 'sel') inp = '<select data-p="' + path + '" data-t="sel">' + opts.map(o => '<option' + (o === val ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+  else inp = '<input id="' + id + '" data-p="' + path + '" data-t="' + type + '" type="' + (type === 'text' ? 'text' : type === 'time' ? 'time' : 'number') + '" step="any" value="' + (val == null ? '' : esc(val)) + '"' + (type === 'numN' ? ' placeholder="off"' : '') + (type === 'text' ? ' style="width:150px;text-align:right"' : '') + '>';
+  return '<div class="field"><div><label>' + label + '</label>' + (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>' + inp + '</div>';
+}
+
+function renderForm() {
+  const st = S.strategy, F = $('stForm'); if (!F) return;
+  if (!st) { F.innerHTML = ''; return; }
+  const pk = st.basket && st.basket.preset, P = pk && st.basket.presets ? st.basket.presets[pk] : null;
+  let h = '';
+  FORM_GROUPS.forEach(([title, fields]) => {
+    if (title === 'LOTS') {
+      const lots = (st.lots || []).slice().sort((a, b) => a.from - b.from);
+      h += '<div class="fgrp"><div class="lbl">Lot table</div><div class="hint muted" style="font-size:11px">Basket mein trade number → lot</div>';
+      lots.forEach((r, i) => {
+        h += '<div class="lotrow" data-lot="' + i + '"><span class="muted mono" style="font-size:11px">Trade</span><input data-l="from" type="number" value="' + r.from + '"><span class="muted">–</span><input data-l="to" type="number" value="' + r.to + '"><span class="muted mono" style="font-size:11px">lot</span><input data-l="lot" type="number" step="0.01" value="' + r.lot + '"><button class="btn small x" data-act="lotDel" style="padding:4px 9px">✕</button></div>';
+      });
+      h += '<div class="btns"><button class="btn small" data-act="lotAdd">+ Row</button></div>' +
+        '<div class="field" style="margin-top:6px"><div><label>Auto-fill</label><div class="hint">Har N trade pe lot badhe</div></div><div style="display:flex;gap:4px;align-items:center">' +
+        '<input id="afN" type="number" value="3" style="width:46px" title="N"><input id="afStart" type="number" step="0.01" value="0.01" style="width:60px" title="start"><input id="afInc" type="number" step="0.01" value="0.01" style="width:60px" title="+inc">' +
+        '<button class="btn small" data-act="lotAuto" style="padding:6px 8px">Fill</button></div></div><div class="hint muted" style="font-size:11px">N · start lot · badhat (max trades tak)</div></div>';
+      return;
+    }
+    if (title === 'PRESET') {
+      if (!P) return;
+      h += '<div class="fgrp"><div class="lbl">Basket preset ' + esc(pk) + ' <span class="muted" style="letter-spacing:.05em;text-transform:none">(upar A/B/C chuno)</span></div>' +
+        fieldHtml('basket.presets.' + pk + '.tp_usd', 'numN', 'Basket TP ($)', 'Khaali = off', null, P.tp_usd) +
+        fieldHtml('basket.presets.' + pk + '.sl_pct_balance', 'numN', 'Basket SL (% balance)', 'Khaali = off · basket start ka balance', null, P.sl_pct_balance) +
+        '<div class="field"><div><label>Trailing</label><div class="hint">Profit pe start, peak se drop</div></div><label class="tog"><input type="checkbox" data-act="trail"' + (P.trail ? ' checked' : '') + '><span></span></label></div>' +
+        (P.trail ? fieldHtml('basket.presets.' + pk + '.trail.start_usd', 'num', 'Trail start ($)', '', null, P.trail.start_usd) + fieldHtml('basket.presets.' + pk + '.trail.drop_usd', 'num', 'Trail drop ($)', '', null, P.trail.drop_usd) : '') +
+        '<div class="btns"><button class="btn small" data-act="presetAdd">+ Naya preset (copy)</button>' + (Object.keys(st.basket.presets).length > 1 ? '<button class="btn small" data-act="presetDel">Preset ' + esc(pk) + ' hatao</button>' : '') + '</div></div>';
+      return;
+    }
+    h += '<div class="fgrp"><div class="lbl">' + title + '</div>' + fields.map(f => fieldHtml(f[0], f[1], f[2], f[3], f[4], getP(st, f[0]))).join('') + '</div>';
+  });
+  F.innerHTML = h;
+}
+
+function formApply(rerender) {
+  setStrategy(S.strategy, 'edited (form)', false, !rerender);
+}
+$('stForm').addEventListener('change', e => {
+  const st = S.strategy, el = e.target; if (!st) return;
+  if (el.dataset.p) {
+    const t = el.dataset.t; let v;
+    if (t === 'bool') v = el.checked;
+    else if (t === 'num') v = el.value === '' ? 0 : +el.value;
+    else if (t === 'numN') v = el.value === '' ? null : +el.value;
+    else v = el.value;
+    setP(st, el.dataset.p, v);
+    return formApply(false);
+  }
+  if (el.dataset.l) {
+    const i = +el.closest('[data-lot]').dataset.lot, lots = st.lots.slice().sort((a, b) => a.from - b.from);
+    lots[i][el.dataset.l] = +el.value; st.lots = lots; return formApply(false);
+  }
+  if (el.dataset.act === 'trail') {
+    const P = st.basket.presets[st.basket.preset];
+    P.trail = el.checked ? { start_usd: 10, drop_usd: 5 } : null; return formApply(true);
+  }
+});
+$('stForm').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b || !S.strategy) return;
+  const st = S.strategy, act = b.dataset.act;
+  if (act === 'lotDel') { const i = +b.closest('[data-lot]').dataset.lot; st.lots = st.lots.slice().sort((x, y) => x.from - y.from); st.lots.splice(i, 1); }
+  if (act === 'lotAdd') { const last = st.lots.slice().sort((x, y) => x.from - y.from).pop(); const f = last ? last.to + 1 : 1; st.lots.push({ from: f, to: f, lot: last ? last.lot : 0.01 }); }
+  if (act === 'lotAuto') {
+    const N = Math.max(1, +$('afN').value || 1), s0 = +$('afStart').value || 0.01, inc = +$('afInc').value || 0, max = st.grid.max_trades || 12, lots = [];
+    for (let f = 1, k = 0; f <= max; f += N, k++) lots.push({ from: f, to: Math.min(max, f + N - 1), lot: Math.round((s0 + inc * k) * 100) / 100 });
+    st.lots = lots;
+  }
+  if (act === 'presetAdd') {
+    const keys = Object.keys(st.basket.presets); let k = 'A'.charCodeAt(0);
+    while (keys.includes(String.fromCharCode(k))) k++;
+    const nk = String.fromCharCode(k);
+    st.basket.presets[nk] = JSON.parse(JSON.stringify(st.basket.presets[st.basket.preset])); st.basket.preset = nk;
+    toast('Preset ' + nk + ' bana (copy)');
+  }
+  if (act === 'presetDel') {
+    if (!confirm('Preset ' + st.basket.preset + ' hata dein?')) return;
+    delete st.basket.presets[st.basket.preset]; st.basket.preset = Object.keys(st.basket.presets)[0];
+  }
+  formApply(true);
+});
 
 /* ===================== RUN ===================== */
 const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case' };

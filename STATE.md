@@ -1,11 +1,12 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.4.0** (branch `feature-v0.4.0`), 19 Nov 2026
+**v0.5.0** (branch `feature-v0.5.0`), 19 Nov 2026
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.5.0 | 19 Nov 2026 | Strategy form editor (30 fields, 8 groups): general, Supertrend, pehla trade TP, grid, lot table (row add/delete + auto-fill N/start/badhat), basket preset (TP/SL/trailing on-off, naya preset copy, preset hatao), daily, costs & filters. Har change turant apply + validate + save; Run screen ke presets bhi update |
 | v0.4.0 | 19 Nov 2026 | Compare screen: saved runs list (max 24, duplicate check, select/remove), equity overlay (% return), side-by-side 23 metrics (best green / worst red), mahine-wise P/L per run, warnings (alag range/balance/strategy), Compare HTML export. Report pe "+ Compare", Matrix pe "Sab Compare mein daalo" (Worst-case rows auto-select). Engine `snapshot()` + 3 tests |
 | v0.3.0 | 19 Nov 2026 | Report screen: 18 stats (PF, win rate, expectancy, recovery, avg/largest win-loss, streaks, worst floating, green/red days, best/worst day), equity + drawdown % chart, mahine-wise P/L (+total), din-wise P/L (7 AM IST, month filter, TARGET/LOSS stop), baskets/trades list (50/page). Export: HTML report (self-contained, strategy JSON included), trades CSV, daily CSV. Matrix row tap → uska report. Last run reload ke baad bhi bacha rehta hai. Engine `report()` + 5 tests |
 | v0.2.0 | 19 Nov 2026 | Engine: M1 OHLC simulation, intrabar path Auto/O→L→H→C/O→H→L→C/Worst-case, CSV ya fixed spread, Supertrend (SMA/RMA ATR, closed bar), Step Basket A/B/C, daily target/loss, 07:00 IST reset. RUN screen (summary, equity, close reasons, last 30 baskets) + A/B/C × path matrix. `docs/ENGINE-RULES.md` |
@@ -56,8 +57,8 @@
 13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
 ## Pending / next
-- [ ] **v0.5.0** Strategy form editor + Parity screen (EA log vs app)
-- [ ] SAMU Universal EA v1.00.mq5
+- [ ] **SAMU Universal EA v1.00.mq5** (JSON padhega, same engine rules, Gold Luxe dashboard, trade log CSV)
+- [ ] Parity screen (EA trade log vs app), EA ka log format fix hone ke baad
 - [ ] TEST EA v0.90 ka ATR method + same-side-grid behaviour confirm karna
 - [ ] Slippage option (trailing/SL pe)
 - [ ] Real MT5 CSV se format confirm karna (abhi synthetic MT5-format data se test hua hai)
