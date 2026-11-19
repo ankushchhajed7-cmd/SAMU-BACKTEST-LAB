@@ -15,7 +15,7 @@ Owner works only from an Android phone (GitHub web + Chrome). Read STATE.md firs
 
 ## Engine
 - Rules in docs/ENGINE-RULES.md; the Universal EA must follow the same rules.
-- Run `node tests/engine.test.js`, `node tests/quad.test.js`, `node tests/sweep.test.js` and `node tests/pyramid.test.js` before every push.
+- Run `node tests/engine.test.js`, `node tests/quad.test.js`, `node tests/sweep.test.js` `node tests/pyramid.test.js` and `node tests/pyramid-ea.test.js` before every push.
 - Every EA/strategy backtest is done in this Lab (owner rule, 19 Nov 2026). Trend Pyramid rules: docs/PYRAMID-RULES.md.
 - QUAD portfolio rules: docs/QUAD-RULES.md.
 
