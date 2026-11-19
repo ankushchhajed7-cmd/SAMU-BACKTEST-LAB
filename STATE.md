@@ -74,7 +74,8 @@
 
 ## Pending / next
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
-- [ ] **EA v1.03 compile + PAPER dashboard screenshot** → OK ho to `feature-ea-v1.03` main mein merge (v1.02 bhi isi mein)
+- [x] `feature-ea-v1.03` main mein merge (19 Nov, Ankush ke kehne par; v1.02 bhi isi mein)
+- [ ] **EA v1.03 compile (VPS Helper → COPY tab) + PAPER dashboard screenshot** — error aaye to v1.04
 - [ ] v1.01 ki asli SELL 0.01 XAUUSDm (13:29 IST, magic 770100) haath se band karni hai
 - [ ] Account equity confirm karo: agar sach mein ~$53 hai to base $1000 ke saath daily loss $50 = poora account
 - [ ] EA v1.02 tester (1 minute OHLC) vs app (Auto path) same data pe compare
