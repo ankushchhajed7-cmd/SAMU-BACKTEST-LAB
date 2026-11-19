@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.8.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.8.1</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -228,6 +228,7 @@ section.scr.on{display:block}
       <button class="btn small" id="btnStep10f">Step $10 (0.01)</button>
       <button class="btn small" id="btnSweep">Liquidity Sweep (QUANT PILOT)</button>
       <button class="btn small" id="btnPyr">Trend Pyramid</button>
+      <button class="btn small" id="btnPyr10k">Trend Pyramid $10k (0.03)</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -1860,7 +1861,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.8.0';
+const APP_VERSION = 'v0.8.1';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -2664,6 +2665,7 @@ $('btnStep10').onclick = () => loadQuad('step-basket-10.json');
 $('btnStep10f').onclick = () => loadQuad('step-basket-10-fixed.json');
 $('btnSweep').onclick = () => loadQuad('liquidity-sweep-qp.json');
 $('btnPyr').onclick = () => loadQuad('trend-pyramid.json');
+$('btnPyr10k').onclick = () => loadQuad('trend-pyramid-10k.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;

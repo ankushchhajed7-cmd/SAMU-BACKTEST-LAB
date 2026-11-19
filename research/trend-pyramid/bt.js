@@ -5,7 +5,7 @@ const root = path.join(__dirname, '..', '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const ctx = { module: { exports: {} } }; vm.createContext(ctx); vm.runInContext(html.split('<script id="engine">')[1].split('</script>')[0], ctx);
 const E = ctx.module.exports;
-const st = JSON.parse(fs.readFileSync(path.join(root, 'strategies/trend-pyramid.json'), 'utf8'));
+const st = JSON.parse(fs.readFileSync(path.join(root, 'strategies/' + (process.env.STRAT || 'trend-pyramid.json')), 'utf8'));
 
 function load(file) {
   const L = zlib.gunzipSync(fs.readFileSync(file)).toString().split(/\r?\n/), N = L.length;
