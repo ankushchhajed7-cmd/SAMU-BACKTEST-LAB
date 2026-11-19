@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.6.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.6.1</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -140,7 +140,7 @@ section.scr.on{display:block}
 <!-- ================= DATA ================= -->
 <section class="scr on" id="scr-data">
   <h2 class="sec">Data</h2>
-  <p class="sub">MT5 → View → Symbols → Bars → M1 → Request → Export. Wo CSV yahan upload karo.</p>
+  <p class="sub">Aasaan tareeka: INVESTOR-ID app → Scan → <b>M1 Data lao</b>, phir yahan <b>GitHub se Data</b>. Ya MT5 → View → Symbols → Bars → M1 → Export wali CSV upload karo.</p>
 
   <div class="card">
     <div class="drop" id="drop">
@@ -148,6 +148,12 @@ section.scr.on{display:block}
       <b>CSV file chuno</b><br><span style="font-size:12px">ya yahan drop karo · UTF-16 / UTF-8, tab / comma dono chalega</span>
     </div>
     <input type="file" id="fileIn" accept=".csv,.txt,text/csv,text/plain" class="hide">
+    <div class="field" style="margin-top:12px">
+      <div><label>GitHub se Data</label><div class="hint">INVESTOR-ID app → Scan → "M1 Data lao" ka data</div></div>
+      <input type="text" id="ghSym" value="XAUUSDm" style="width:110px;text-align:right">
+    </div>
+    <div class="btns"><button class="btn small solid" id="btnGhData">⬇ GitHub se Data</button></div>
+    <div class="mono muted" id="ghMsg" style="font-size:11px;margin-top:6px"></div>
     <div id="loadProg" class="hide">
       <div class="mono muted" id="loadMsg" style="margin-top:10px">Padh raha hoon…</div>
       <div class="bar"><i id="loadBar"></i></div>
@@ -1217,7 +1223,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.6.0';
+const APP_VERSION = 'v0.6.1';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1540,6 +1546,35 @@ async function loadFile(f) {
     $('dataEmpty').innerHTML = '<b>Load fail:</b> ' + esc(err.message || err);
   }
 }
+
+
+/* ---------- v0.6.1: GitHub se M1 data (INVESTOR-ID repo, data/m1/) ---------- */
+const GH_DATA = 'https://raw.githubusercontent.com/ankushchhajed7-cmd/INVESTOR-ID/main/data/m1/';
+async function loadFromGitHub() {
+  const sym = ($('ghSym').value || 'XAUUSDm').trim().replace(/[^A-Za-z0-9._\-]/g, '_');
+  lsSet('samu.ghSym', sym);
+  const msg = t => { $('ghMsg').innerHTML = t; };
+  if (typeof DecompressionStream === 'undefined') return msg('<span class="badc">Is browser mein gzip nahi khulta — Chrome update karo.</span>');
+  msg('Meta padh raha hoon…');
+  try {
+    let meta = null;
+    try { const r = await fetch(GH_DATA + sym + '_M1.json?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) meta = await r.json(); } catch (e) {}
+    if (!meta) return msg('<span class="badc">' + esc(sym) + ' ka data GitHub pe nahi mila. Pehle INVESTOR-ID app → Scan → "M1 Data lao" chalao.</span>');
+    msg('Download ho raha hai: ' + fmtInt(meta.bars) + ' bars (' + esc(meta.from.slice(0, 10)) + ' → ' + esc(meta.to.slice(0, 10)) + ')…');
+    const r = await fetch(GH_DATA + encodeURIComponent(meta.file) + '?t=' + meta.fetched_at, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const raw = new Response(r.body.pipeThrough(new DecompressionStream('gzip')));
+    const buf = await raw.arrayBuffer();
+    const f = new File([buf], meta.symbol + '_M1.csv', { type: 'text/csv' });
+    if (meta.server_offset_h != null && isFinite(meta.server_offset_h)) {
+      $('offIn').value = meta.server_offset_h; $('offIn').dispatchEvent(new Event('change'));
+    }
+    await loadFile(f);
+    msg('✓ ' + esc(meta.symbol) + ' · ' + fmtInt(meta.bars) + ' M1 bars · ' + esc(meta.from) + ' → ' + esc(meta.to) + ' (server)' + (meta.server_offset_h != null ? ' · GMT+' + meta.server_offset_h : '') + ' · laaya ' + istNow(meta.fetched_at * 1000) + ' IST');
+  } catch (e) { msg('<span class="badc">Load fail: ' + esc(e.message || e) + '</span>'); }
+}
+$('btnGhData').onclick = loadFromGitHub;
+try { const v = lsGet('samu.ghSym'); if (v) $('ghSym').value = v; } catch (e) {}
 
 async function persistDataset() {
   if (!S.ds) return;
