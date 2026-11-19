@@ -3,9 +3,14 @@
 ## Current version
 **v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
 
+## EA
+**SAMU Universal EA v1.01** (branch `feature-ea-v1.01`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
+
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| EA v1.01 | 19 Nov 2026 | Purane account pe safe: **Own P/L mode** (InpOwnMode, InpAllocBalance $1000, InpAllocFrom) — daily % + basket SL sirf is EA ke trades se; **margin guard** (InpMinMarginLevel 300%); **magic clash check** (khuli + 30 din history); dashboard pe EA equity, account equity, margin level. Ankush: VPS pe nayi account ki jagah nahi → purane $1000 account pe lagayenge |
+| EA v1.00 | 19 Nov 2026 | `ea/SAMU Universal EA v1.00.mq5`: JSON parser (MQL5\Files), same engine rules, Supertrend (SMA/RMA, closed bar), grid + lot table, presets TP/SL/trailing, TP1 (broker + virtual), daily target/loss 07:00 IST, spread/time filters, built-in strategy fallback (JSON file na ho to), restart-safe state (Global Variables), trade log CSV (app ke Trades CSV jaisa), Gold Luxe dashboard (DPI scale, PAUSE / CLOSE ALL, CONFIG ERROR banner). `tests/ea-config.test.js`, `docs/EA-SETUP.md` |
 | v0.5.1 | 19 Nov 2026 | Header mein ⟳ Refresh button: app cache saaf + latest version + reload (data safe). Refresh ke baad toast ("Update ho gaya: purana → naya"). Offline pe refresh nahi. Service worker ab browser HTTP cache bypass karta hai (`no-cache`) |
 | v0.5.0 | 19 Nov 2026 | Strategy form editor (30 fields, 8 groups): general, Supertrend, pehla trade TP, grid, lot table (row add/delete + auto-fill N/start/badhat), basket preset (TP/SL/trailing on-off, naya preset copy, preset hatao), daily, costs & filters. Har change turant apply + validate + save; Run screen ke presets bhi update |
 | v0.4.0 | 19 Nov 2026 | Compare screen: saved runs list (max 24, duplicate check, select/remove), equity overlay (% return), side-by-side 23 metrics (best green / worst red), mahine-wise P/L per run, warnings (alag range/balance/strategy), Compare HTML export. Report pe "+ Compare", Matrix pe "Sab Compare mein daalo" (Worst-case rows auto-select). Engine `snapshot()` + 3 tests |
@@ -22,6 +27,9 @@
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
+| `ea/SAMU Universal EA v1.01.mq5` | Universal EA |
+| `docs/EA-SETUP.md` | EA VPS setup, tester, log |
+| `tests/ea-config.test.js` | EA ke JSON keys = strategy file (`node tests/ea-config.test.js`) |
 | `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 24 tests) |
 | `icons/icon-192.png`, `icons/icon-512.png` | App icons |
 
@@ -56,14 +64,17 @@
 8. Swap/commission = 0 (Phase 1)
 9. (v0.2.0) Jab tak sirf pehla trade hai aur uska TP laga hai, usi side ka grid trade nahi khulta. Warna spread ki wajah se +$5 pe TP se pehle naya BUY khul jaata aur TP kabhi hit nahi hota
 10. (v0.2.0) Nayi basket sirf naye M1 bar ke open pe khulti hai (EA bhi yahi karega)
-11. (v0.2.0) Supertrend ATR = SMA (MT5 iATR) default; `rma` option. TEST EA v0.90 kaunsa use karta hai, confirm karna hai
+11. (v0.2.0) Supertrend ATR = SMA (MT5 iATR) default; `rma` option. (19 Nov: Ankush ne default = SMA confirm kiya)
+14. (EA v1.00) EA strategy JSON `MQL5\Files\step-basket.json` se padhta hai (Common folder optional). Config galat ho to live chart pe CONFIG ERROR banner, tester mein init fail
 12. (v0.2.0) Max DD = floating equity (bar ke low tak) pe, closed-equity peak se
 13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
 ## Pending / next
-- [ ] **SAMU Universal EA v1.00.mq5** (JSON padhega, same engine rules, Gold Luxe dashboard, trade log CSV)
+- [ ] **EA v1.01 compile (VPS Helper → COPY tab) + purane $1000 account pe chart** — errors / dashboard ka screenshot bhejna
+- [ ] Compile OK ke baad `feature-ea-v1.01` ko main mein merge
+- [ ] EA v1.01 tester (1 minute OHLC) vs app (Auto path) same data pe compare
 - [ ] Parity screen (EA trade log vs app), EA ka log format fix hone ke baad
-- [ ] TEST EA v0.90 ka ATR method + same-side-grid behaviour confirm karna
+- [ ] TEST EA v0.90 ka same-side-grid behaviour confirm karna
 - [ ] Slippage option (trailing/SL pe)
 - [ ] Real MT5 CSV se format confirm karna (abhi synthetic MT5-format data se test hua hai)
 - [ ] Phase 2: VPS Helper → MT5 Strategy Tester real-tick report
