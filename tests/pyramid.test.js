@@ -145,5 +145,14 @@ const first = (r, k) => r.baskets.filter(k)[0];
   ok('presets: PURE_2, COMBO_3, COMBO_10 maujood', ['PURE_2', 'COMBO_3', 'COMBO_10'].every(k => ks.includes(k)), ks.join(','));
   ok('default preset exists', !!base.basket.presets[base.basket.preset], base.basket.preset);
 }
+// 19) $10k file (lot 0.03, $ ×3) = 0.01 file ka bilkul 3 guna
+{
+  const k10 = JSON.parse(fs.readFileSync(path.join(root, 'strategies/trend-pyramid-10k.json'), 'utf8'));
+  ok('10k: lot 0.03, TP 45, max loss 60, daily 90/120', k10.lot === 0.03 && k10.basket.tp_usd === 45 && k10.loss_grid.max_loss_usd === 60 && k10.daily.target_usd === 90 && k10.daily.loss_usd === 120 && k10.default_balance === 10000);
+  const mv = []; for (let i = 0; i < 600; i++) mv.push(2000 + 6 * Math.sin(i / 9) + i * 0.02);
+  const a = E.run(build(mv), base, { balance: 10000, preset: 'COMBO_10', spreadMode: 'fixed', fixedPts: 240, forceSignal: 1 });
+  const b = E.run(build(mv), k10, { balance: 10000, preset: 'COMBO_10', spreadMode: 'fixed', fixedPts: 240, forceSignal: 1 });
+  ok('10k net = 3 × base net (same baskets)', near(b.net, 3 * a.net, 1e-6) && a.baskets.length === b.baskets.length, a.net.toFixed(2) + ' ×3 = ' + b.net.toFixed(2));
+}
 console.log(fails ? '\n' + fails + ' FAILED' : '\nALL PASSED');
 process.exit(fails ? 1 : 0);

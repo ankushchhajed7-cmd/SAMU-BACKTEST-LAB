@@ -30,3 +30,14 @@ Exits: Basket TP 109 (+$1,635), Grid recover 99 (+$297), Max loss 70 (−$1,401)
 - Sirf 101 din ka data, aur step 8–10 data dekh ke chuna gaya (overfit ka risk). Pakka faisla: PAPER forward test + 6 mahine data.
 - $1,000 pe DD 19–31% ($190–310). $50 account pe −$20 basket aur −$40 din = account ka bada hissa.
 - News filter backtest mein nahi.
+
+## $10,000 account, lot 0.03 (Ankush ka faisla, 19 Nov)
+`strategies/trend-pyramid-10k.json` (saari $ values ×3). `STRAT=trend-pyramid-10k.json node research/trend-pyramid/bt.js <file>`
+| Preset | Auto | Worst | Max DD |
+|---|---|---|---|
+| COMBO_10 | +$1,602 (+16.0%) | +$1,602 | $780 (7.0%) |
+| COMBO_8 | +$1,131 (+11.3%) | +$616 | $1,214 (11.1%) |
+| PURE_10 | +$727 (+7.3%) | +$727 | $943 (8.5%) |
+| COMBO_3 | +$587 | −$4,986 | 50% (Worst) |
+| PURE_2 | −$348 | −$8,817 | 88% (Worst) |
+COMBO_10: worst din −$120, 51 green / 27 red din, mahine −160 / +947 / +261 / +554.

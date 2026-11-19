@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.8.0** (branch `feature-v0.8.0`), 19 Nov 2026 — Trend Pyramid engine (H1 EMA trend + profit pe add + optional loss grid)
+**v0.8.1** (branch `feature-v0.8.1`), 19 Nov 2026 — Trend Pyramid $10k (lot 0.03) strategy file
 
 ## EA
 **SAMU Universal EA v1.04** — Friday stop + news filter; VPS Helper se VPS pe (samusignal `vps-ea/`), strategy JSON bhi Helper v1.06 se (`vps-files/step-basket.json` = Step Basket $10 FINAL). Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.8.1 | 19 Nov 2026 | **Trend Pyramid $10k (0.03)**: Ankush ka account $10,000, lot **0.03** (Ankush ka faisla). `strategies/trend-pyramid-10k.json` = 0.01 file ka ×3 (TP $45, recover $9, max loss −$60, daily +$90 / −$120), default COMBO_10, balance $10k. Strategy screen pe **Trend Pyramid $10k (0.03)** button. Test: 10k net = 3 × base (31 tests). `bt.js` mein `STRAT` env |
 | v0.8.0 | 19 Nov 2026 | **Trend Pyramid engine** (`runPyramid`, schema `samu-strategy/4`): H1 EMA 50/200 trend ki side **turant entry** (koi wait nahi, basket band hote hi agle M1 bar pe nayi), profit side har step pe add (max 5), har add ke baad SL = last add − trail gap, pure mode pehla SL ATR(M15)×1.5, combo mode loss grid (ATR×1, max 2, recover +$3, max loss −$20), basket TP $15, daily +$30 / −$40 ($), trend flip close + reverse, Friday 20:45 close. `strategies/trend-pyramid.json` (7 presets: PURE_2/3/10, COMBO_2/3/8/10, default COMBO_10, balance $1000), Strategy screen pe **Trend Pyramid** button + form (preset ke step/trail/grid/TP), Run/Report pe Exits + adds card, HTML report. `docs/PYRAMID-RULES.md`, `tests/pyramid.test.js` (29), `research/trend-pyramid/` (bt.js + REPORT.md) |
 | v0.7.0 | 19 Nov 2026 | **Liquidity Sweep engine** (`runSweep`, schema `samu-strategy/3`): Sumedh Kumar ke QUANT PILOT repo (github.com/sumedhkumar/sumedhkumarQP) ki strategy ka JS port — levels (PDH/PDL, Asia, 4H swing, EQH/EQL), sweep + displacement, rule-based confidence, Guardian (1% risk, max 2, DD 4%, London/NY, cooldown), BE 1R / TP1 50% / trailing / TP2. Presets: **REAL** (M1 fill + CSV spread), **QP** (unka apna backtester, trade-by-trade match), REAL_ALLDAY, REAL_CONF6. `strategies/liquidity-sweep-qp.json` (`default_balance` 10000 → button se load pe RUN balance $10k), Strategy screen pe **Liquidity Sweep (QUANT PILOT)** button + form, Run/Report pe Guardian + exits card, HTML report mein sweep trades (level, confidence). CSV loader ab **tick volume** bhi rakhta hai (`ds.v`, IndexedDB mein bhi). `docs/SWEEP-RULES.md`, `tests/sweep.test.js` (25). Header version fix (v0.6.4 dikh raha tha) |
 | v0.6.7 | 19 Nov 2026 | **QUAD cancel** (gold + US30 dono par loss). **SAMU AI PRO research** (`research/samu-ai-pro/`): SAMUSIGNAL AI engine ka 28 forex pair backtest (Exness M1, 13 Aug–19 Nov). AI AUTO niyam engine-only: 861 trade, 77.6 % win, −$122.5 (0.01 lot) — break-even 85.7 %. Har TP/SL variant minus. Live AI AUTO 72/74 (97 %) lekin sirf 12–19 Nov (usi hafte engine-only 84.6 %). Report: `research/samu-ai-pro/REPORT.md` |
@@ -41,7 +42,8 @@
 | `docs/QUAD-RULES.md` | QUAD engine ke exact rules (4 EA + TESTER EA parity) |
 | `strategies/liquidity-sweep-qp.json` | Liquidity Sweep (QUANT PILOT) strategy (schema `samu-strategy/3`) |
 | `docs/SWEEP-RULES.md` | Liquidity Sweep engine ke exact rules + QP/REAL modes |
-| `strategies/trend-pyramid.json` | Trend Pyramid strategy (schema `samu-strategy/4`) |
+| `strategies/trend-pyramid.json` | Trend Pyramid strategy (schema `samu-strategy/4`), $1000 / 0.01 |
+| `strategies/trend-pyramid-10k.json` | Trend Pyramid, $10,000 / 0.03 (Ankush ka live setup) |
 | `docs/PYRAMID-RULES.md` | Trend Pyramid engine ke exact rules |
 | `tests/pyramid.test.js` | Trend Pyramid tests (`node tests/pyramid.test.js`) |
 | `research/trend-pyramid/` | Trend Pyramid backtest script + REPORT.md |
@@ -123,10 +125,11 @@
 - Ankush (19 Nov): **aage se har backtest is Lab mein hi** (alag chat script nahi)
 - 101 din, $1000, CSV spread: **COMBO_10 +$534 (+53%), DD 19%, PF 1.28, chaaro raaste same**; COMBO_8 +$205…+$377; PURE_10 +$242. Step $2–3: Auto ±, Worst −$1,600 se −$2,900 (M1 raasta tight trailing ko naap nahi sakta) → chhota step reject
 - Pehle chat ka Twelve Data M5 test (Pure $2 = +$589) galat tha — candle raasta + spread model kamzor. Details: `research/trend-pyramid/REPORT.md`
-- Agla: Ankush step/preset final kare → EA (Gold Luxe dashboard, PAPER default) → PAPER forward test
+- **Ankush (19 Nov): account $10,000, lot 0.03.** COMBO_10 (101 din, CSV spread): **+$1,602 (+16.0%), DD $780 (7.0%), worst din −$120, 51 green / 27 red din**, chaaro raaste same. Mahine: Aug −$160 · Sep +$947 · Oct +$261 · Nov +$554. Avg ~$20/din (target 1%/din = $100 se kaafi kam)
+- Agla: EA (Gold Luxe dashboard, PAPER default) → PAPER forward test
 
 ## Pending / next
-- [ ] Trend Pyramid: Ankush preset final kare (data: COMBO_10) → MQL5 EA + PAPER test
+- [ ] Trend Pyramid: preset COMBO_10 confirm (data ka best) → MQL5 EA ($10k, 0.03) + PAPER test
 - **SAMU AI PRO:** AI AUTO demo par 3–4 hafte record (≥ 200 trade, ek kharab hafta milakar); AI-rejected signals ka paper (AI ki asli keemat); tab EA faisla. Real / lot nahi badhana.
 - INVESTOR-ID: M1 Data button 2 baar dispatch hota hai (do run, pehla cancel, ~5 min barbaad) — theek karna.
 - [ ] Liquidity Sweep: Ankush decide kare — chhod do, ya depth scale (ATR) / TP badal ke naya test; achha nikle tabhi MQL5 EA

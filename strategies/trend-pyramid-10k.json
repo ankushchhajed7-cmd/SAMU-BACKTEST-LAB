@@ -1,0 +1,104 @@
+{
+  "schema": "samu-strategy/4",
+  "name": "Trend Pyramid Grid $10k (0.03)",
+  "version": "1.0.0",
+  "notes": "Ankush ka $10,000 account: lot 0.03, saari $ values 0.01 wali file ka ×3 (TP $45, grid recover $9, basket max loss −$60, daily +$90 / −$120). Baaki rules same.",
+  "symbol": "XAUUSDm",
+  "contract_size": 100,
+  "point": 0.001,
+  "server_gmt_offset_hours": 0,
+  "default_balance": 10000,
+  "trend": {
+    "tf": "H1",
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "use_closed_bar": true
+  },
+  "entry": {
+    "immediate": true,
+    "open_on": "new_m1_bar",
+    "flip_close_reverse": true
+  },
+  "atr": {
+    "tf": "M15",
+    "period": 14,
+    "method": "sma"
+  },
+  "lot": 0.03,
+  "first_sl_atr": 1.5,
+  "pyramid": {
+    "step_price": 2,
+    "max_adds": 5,
+    "trail_gap_price": null
+  },
+  "loss_grid": {
+    "levels": 0,
+    "gap_atr": 1.0,
+    "recover_usd": 9,
+    "max_loss_usd": 60
+  },
+  "basket": {
+    "preset": "COMBO_10",
+    "tp_usd": 45,
+    "presets": {
+      "PURE_2": {
+        "label": "Pure Pyramid · step $2 · loss grid nahi",
+        "loss_levels": 0,
+        "step_price": 2
+      },
+      "PURE_3": {
+        "label": "Pure Pyramid · step $3 · loss grid nahi",
+        "loss_levels": 0,
+        "step_price": 3
+      },
+      "COMBO_2": {
+        "label": "Combo · step $2 · loss grid 2 (ATR×1)",
+        "loss_levels": 2,
+        "step_price": 2
+      },
+      "COMBO_3": {
+        "label": "Combo · step $3 · loss grid 2 (ATR×1)",
+        "loss_levels": 2,
+        "step_price": 3
+      },
+      "PURE_10": {
+        "label": "Pure Pyramid · step $10 · loss grid nahi",
+        "loss_levels": 0,
+        "step_price": 10
+      },
+      "COMBO_8": {
+        "label": "Combo · step $8 · loss grid 2 (ATR×1)",
+        "loss_levels": 2,
+        "step_price": 8
+      },
+      "COMBO_10": {
+        "label": "Combo · step $10 · loss grid 2 (ATR×1)",
+        "loss_levels": 2,
+        "step_price": 10
+      }
+    }
+  },
+  "daily": {
+    "target_usd": 90,
+    "loss_usd": 120,
+    "reset_time": "07:00",
+    "tz": "IST",
+    "on_hit": "close_all_stop_day"
+  },
+  "costs": {
+    "commission_per_lot": 0,
+    "swap": false
+  },
+  "filters": {
+    "max_spread_points": 0,
+    "friday_close": {
+      "enabled": true,
+      "server_time": "20:45"
+    },
+    "news": {
+      "enabled": true,
+      "before_min": 30,
+      "after_min": 30
+    }
+  }
+}
