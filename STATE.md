@@ -4,7 +4,7 @@
 **v0.6.6** (branch `feature-v0.6.6`), 19 Nov 2026 — Universal EA v1.04 (Friday stop + news)
 
 ## EA
-**SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
+**SAMU Universal EA v1.04** — Friday stop + news filter; VPS Helper se VPS pe (samusignal `vps-ea/`), strategy JSON bhi Helper v1.06 se (`vps-files/step-basket.json` = Step Basket $10 FINAL). Setup: `docs/EA-SETUP.md`
 
 ## Version history
 | Version | Date | Kya aaya |
@@ -39,7 +39,7 @@
 | `tests/quad.test.js` | QUAD engine tests (`node tests/quad.test.js`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
-| `ea/SAMU Universal EA v1.03.mq5` | Universal EA |
+| `ea/SAMU Universal EA v1.04.mq5` | Universal EA |
 | `docs/EA-SETUP.md` | EA VPS setup, tester, log |
 | `tests/ea-config.test.js` | EA ke JSON keys = strategy file (`node tests/ea-config.test.js`) |
 | `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 24 tests) |
