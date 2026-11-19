@@ -101,6 +101,7 @@ section.scr.on{display:block}
 .soon{text-align:center;padding:30px 12px}
 .soon .big{font-size:30px}
 .hide{display:none!important}
+#cmpTbl td:first-child,#cmpTbl th:first-child,#cmpMonths td:first-child,#cmpMonths th:first-child{position:sticky;left:0;background:var(--panel);z-index:1}
 </style>
 </head>
 <body>
@@ -109,7 +110,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.3.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.4.0</small></h1>
     </div>
     <div class="clocks">
       IST <b id="clkIst">--:--:--</b><br>
@@ -282,6 +283,7 @@ section.scr.on{display:block}
     <div class="card">
       <div class="lbl">Matrix: preset × path</div>
       <div class="scroll"><table class="tbl" id="mxTbl"></table></div>
+      <div class="btns"><button class="btn small" id="btnMxCmp">Sab Compare mein daalo</button></div>
       <div class="muted" style="font-size:11px;margin-top:6px">Kisi row pe tap karo → uska poora Report. Faisla Worst-case row se lo: jo preset worst-case mein bhi theek ho, wahi live ke layak hai.</div>
     </div>
   </div>
@@ -301,6 +303,7 @@ section.scr.on{display:block}
         <button class="btn solid small" id="btnExpHtml">⬇ HTML report</button>
         <button class="btn small" id="btnExpTrades">⬇ Trades CSV</button>
         <button class="btn small" id="btnExpDaily">⬇ Daily CSV</button>
+        <button class="btn small" id="btnAddCmp">+ Compare</button>
       </div>
     </div>
 
@@ -344,10 +347,37 @@ section.scr.on{display:block}
 <!-- ================= COMPARE ================= -->
 <section class="scr" id="scr-compare">
   <h2 class="sec">Compare</h2>
-  <div class="card soon">
-    <div class="lbl">Coming in v0.4.0</div>
-    <div class="big">A · B · C</div>
-    <p class="muted" style="font-size:13px">Do ya zyada runs side-by-side · equity curves ek saath · HTML / CSV export</p>
+  <p class="sub">Report screen pe "+ Compare" ya Matrix mein "Sab Compare mein daalo". Chune hue runs side-by-side.</p>
+
+  <div class="card">
+    <div class="lbl">Saved runs</div>
+    <div id="cmpList" style="margin-top:6px"></div>
+    <div class="btns">
+      <button class="btn small" id="btnCmpAll">Sab chuno</button>
+      <button class="btn small" id="btnCmpNone">Koi nahi</button>
+      <button class="btn small" id="btnCmpClear">Sab hatao</button>
+      <button class="btn solid small" id="btnCmpExport">⬇ Compare HTML</button>
+    </div>
+  </div>
+
+  <div id="cmpEmpty" class="banner info">Compare ke liye kam se kam 1 run save karo (2+ ho to side-by-side).</div>
+  <div id="cmpWarn"></div>
+
+  <div id="cmpOut" class="hide">
+    <div class="card">
+      <div class="lbl">Equity (% return)</div>
+      <canvas id="cmpChart" style="height:220px"></canvas>
+      <div id="cmpLegend" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Side-by-side</div>
+      <div class="scroll"><table class="tbl" id="cmpTbl"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Har row mein sabse achha number <span class="good">green</span>, sabse bura <span class="badc">red</span>.</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Mahine-wise P/L</div>
+      <div class="scroll"><table class="tbl" id="cmpMonths"></table></div>
+    </div>
   </div>
 </section>
 
@@ -362,7 +392,7 @@ section.scr.on{display:block}
 </nav>
 
 <script id="engine">
-/* ===================== SAMU ENGINE v0.3.0 =====================
+/* ===================== SAMU ENGINE v0.4.0 =====================
    Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
    (Universal EA must follow the same rules for parity). */
 var SamuEngine = (function () {
@@ -711,13 +741,37 @@ var SamuEngine = (function () {
     };
   }
 
-  return { run: run, report: report, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
+  /* ---------- snapshot: small copy of a run for Compare ---------- */
+  function snapshot(r, rep, points) {
+    rep = rep || report(r); points = points || 600;
+    var n = r.eqClose.length, k = Math.max(1, Math.ceil(n / points)), eq = [], lo = [], tt = [];
+    for (var i = 0; i < n; i += k) {
+      var m = Infinity, j = Math.min(n, i + k);
+      for (var q = i; q < j; q++) if (r.eqLow[q] < m) m = r.eqLow[q];
+      eq.push(r.eqClose[j - 1]); lo.push(m); tt.push(r.barT[j - 1]);
+    }
+    eq[eq.length - 1] = r.endBal;
+    var s = rep.stats;
+    return {
+      strategyName: r.strategyName, opt: r.opt, from: r.from, to: r.to, ranAt: r.ranAt || null,
+      startBal: r.startBal, endBal: r.endBal, net: r.net, netPct: r.netPct, maxDD: r.maxDD, maxDDPct: r.maxDDPct,
+      pf: isFinite(r.pf) ? r.pf : null, winRate: r.winRate, baskets: r.baskets.length, trades: r.trades.length,
+      dayTarget: r.dayTarget, dayLoss: r.dayLoss, maxTradesInBasket: r.maxTradesInBasket,
+      expectancy: s.expectancy, recovery: s.recovery, avgWin: s.avgWin, avgLoss: s.avgLoss, largestLoss: s.largestLoss,
+      maxConsLosses: s.maxConsLosses, worstFloating: s.worstFloating, greenDays: s.greenDays, redDays: s.redDays,
+      worstDay: s.worstDay ? s.worstDay.pl : 0, bestDay: s.bestDay ? s.bestDay.pl : 0,
+      months: rep.months.map(function (m) { return { month: m.month, pl: m.pl, pct: m.pct }; }),
+      eq: eq, eqLow: lo, t: tt, reasons: r.reasons
+    };
+  }
+
+  return { run: run, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.3.0';
+const APP_VERSION = 'v0.4.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -781,6 +835,7 @@ $('nav').addEventListener('click', e => {
   lsSet('samu.tab', b.dataset.scr);
   if (b.dataset.scr === 'data' && S.ds) drawChart();
   if (b.dataset.scr === 'report') setTimeout(drawRepCharts, 0);
+  if (b.dataset.scr === 'compare') setTimeout(drawCmpChart, 0);
   if (b.dataset.scr === 'run') { renderRunReady(); if (S.lastRun) setTimeout(() => drawEquity(S.lastRun), 0); }
   window.scrollTo(0, 0);
 });
@@ -1645,6 +1700,177 @@ function buildHtmlReport(r, rep, st) {
     '</main></body></html>';
 }
 
+/* ===================== COMPARE ===================== */
+const CMP_COLORS = ['#d4af37', '#4fc3f7', '#ef6fb0', '#7bd389', '#ff9f43', '#b39ddb', '#f06262', '#e6e6e6'];
+const PATH_SHORT = { auto: 'Auto', olhc: 'OLHC', ohlc: 'OHLC', worst: 'Worst' };
+const CMP_MAX = 24;
+S.cmp = [];
+const cmpLabel = s => s.opt.preset + ' · ' + PATH_SHORT[s.opt.path] + ' · ' + (s.opt.spread === 'CSV' ? 'CSV spr' : s.opt.spread);
+const cmpKey = s => [s.strategyName, JSON.stringify(s.opt), s.from, s.to, s.net.toFixed(6)].join('|');
+function saveCmp() { try { DB.put('cmp', S.cmp); } catch (e) {} }
+
+function addToCompare(r, quiet) {
+  const snap = SamuEngine.snapshot(r, r === S.lastRun ? S.rep : null);
+  const key = cmpKey(snap);
+  if (S.cmp.some(c => c.key === key)) { if (!quiet) toast('Ye run pehle se Compare mein hai'); return false; }
+  if (S.cmp.length >= CMP_MAX) { if (!quiet) toast('Max ' + CMP_MAX + ' runs. Pehle kuch hatao.'); return false; }
+  S.cmp.push({ id: Date.now() + Math.random(), key, label: cmpLabel(snap), color: '', sel: S.cmp.filter(c => c.sel).length < CMP_COLORS.length, snap });
+  saveCmp(); renderCompare();
+  if (!quiet) toast('Compare mein add hua: ' + cmpLabel(snap));
+  return true;
+}
+
+let toastT;
+function toast(msg) {
+  let el = $('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.style.cssText = 'position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1a1609;border:1px solid var(--gold);color:var(--gold2);padding:8px 14px;border-radius:20px;font-size:13px;z-index:9;max-width:90vw;text-align:center'; document.body.appendChild(el); }
+  el.textContent = msg; el.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => el.style.display = 'none', 2200);
+}
+
+$('btnAddCmp').onclick = () => { if (S.lastRun) addToCompare(S.lastRun); };
+$('btnMxCmp').onclick = () => {
+  if (!S.lastMatrix) return; let n = 0;
+  S.lastMatrix.forEach(x => { if (addToCompare(x.r, true)) n++; });
+  const keys = new Set(S.lastMatrix.map(x => cmpKey(SamuEngine.snapshot(x.r))));
+  S.cmp.forEach(c => { if (keys.has(c.key)) c.sel = c.snap.opt.path === 'worst'; });
+  saveCmp(); renderCompare();
+  toast(n + ' runs add hue · Worst-case wale chune gaye'); goTab('compare');
+};
+$('btnCmpAll').onclick = () => { S.cmp.forEach(c => c.sel = true); saveCmp(); renderCompare(); };
+$('btnCmpNone').onclick = () => { S.cmp.forEach(c => c.sel = false); saveCmp(); renderCompare(); };
+$('btnCmpClear').onclick = () => { if (!S.cmp.length || !confirm('Saare saved runs hata dein?')) return; S.cmp = []; saveCmp(); renderCompare(); };
+$('cmpList').onclick = e => {
+  const row = e.target.closest('[data-id]'); if (!row) return;
+  const c = S.cmp.find(x => String(x.id) === row.dataset.id); if (!c) return;
+  if (e.target.closest('.rm')) S.cmp = S.cmp.filter(x => x !== c); else c.sel = !c.sel;
+  saveCmp(); renderCompare();
+};
+
+const CMP_ROWS = [
+  ['Net profit', s => s.net, v => money(v), 'high'],
+  ['Net %', s => s.netPct, v => pctS(v), 'high'],
+  ['Max DD %', s => s.maxDDPct, v => fmtNum(v, 1) + '%', 'low'],
+  ['Max DD $', s => s.maxDD, v => money(v), 'low'],
+  ['Profit factor', s => s.pf, v => v == null ? '∞' : fmtNum(v, 2), 'high'],
+  ['Recovery factor', s => s.recovery, v => fmtNum(v, 2), 'high'],
+  ['Win rate', s => s.winRate, v => fmtNum(v, 1) + '%', 'high'],
+  ['Expectancy', s => s.expectancy, v => money(v), 'high'],
+  ['Avg win', s => s.avgWin, v => money(v), 'high'],
+  ['Avg loss', s => s.avgLoss, v => money(v), 'high'],
+  ['Largest loss', s => s.largestLoss, v => money(v), 'high'],
+  ['Worst floating', s => s.worstFloating, v => money(v), 'high'],
+  ['Worst day', s => s.worstDay, v => money(v), 'high'],
+  ['Best day', s => s.bestDay, v => money(v), 'high'],
+  ['Max cons. losses', s => s.maxConsLosses, v => v, 'low'],
+  ['Green / red days', s => s.greenDays, (v, s) => s.greenDays + ' / ' + s.redDays, null],
+  ['Target days', s => s.dayTarget, v => v, 'high'],
+  ['Loss days', s => s.dayLoss, v => v, 'low'],
+  ['Baskets', s => s.baskets, v => fmtInt(v), null],
+  ['Trades', s => s.trades, v => fmtInt(v), null],
+  ['Max trades / basket', s => s.maxTradesInBasket, v => v, null],
+  ['Start balance', s => s.startBal, v => money(v), null],
+  ['Range', s => s.from, (v, s) => fmtDate(s.from).slice(2) + '→' + fmtDate(s.to).slice(2), null]
+];
+
+function cmpCells(sel) {
+  // returns rows of {label, cells:[{txt, cls}]}
+  return CMP_ROWS.map(([label, get, fmt, better]) => {
+    const vals = sel.map(c => { const v = get(c.snap); return v == null && label === 'Profit factor' ? Infinity : v; });
+    let best = null, worst = null;
+    if (better && sel.length > 1) {
+      const nums = vals.filter(v => typeof v === 'number' && !isNaN(v));
+      const hi = Math.max(...nums), lo = Math.min(...nums);
+      if (hi !== lo) { best = better === 'high' ? hi : lo; worst = better === 'high' ? lo : hi; }
+    }
+    return { label, cells: sel.map((c, i) => ({ txt: fmt(get(c.snap), c.snap), cls: vals[i] === best ? 'good' : vals[i] === worst ? 'badc' : '' })) };
+  });
+}
+function cmpMonths(sel) {
+  const months = [...new Set(sel.flatMap(c => c.snap.months.map(m => m.month)))].sort();
+  return months.map(m => ({ month: m, cells: sel.map(c => { const x = c.snap.months.find(y => y.month === m); return x ? x : null; }) }));
+}
+
+function renderCompare() {
+  let si = 0; S.cmp.forEach(c => c.color = c.sel ? CMP_COLORS[si++ % CMP_COLORS.length] : '#6b6555');
+  const list = $('cmpList');
+  list.innerHTML = S.cmp.length ? S.cmp.map(c =>
+    '<div data-id="' + c.id + '" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #161309;cursor:pointer">' +
+    '<span style="width:20px;height:20px;border-radius:5px;border:1.5px solid ' + c.color + ';background:' + (c.sel ? c.color : 'transparent') + ';flex:none"></span>' +
+    '<div style="flex:1;min-width:0"><div style="font-size:13px;color:' + c.color + '">' + esc(c.label) + '</div><div class="mono muted" style="font-size:11px">' +
+    esc(c.snap.strategyName) + ' · ' + fmtDate(c.snap.from) + '→' + fmtDate(c.snap.to) + ' · <span class="' + signCls(c.snap.net) + '">' + money(c.snap.net) + '</span> · DD ' + fmtNum(c.snap.maxDDPct, 1) + '%</div></div>' +
+    '<button class="btn small rm" style="padding:4px 9px">✕</button></div>').join('') : '<div class="muted" style="font-size:13px">Abhi koi run save nahi hai.</div>';
+  const sel = S.cmp.filter(c => c.sel);
+  $('cmpEmpty').classList.toggle('hide', sel.length > 0);
+  $('cmpOut').classList.toggle('hide', !sel.length);
+  $('btnCmpExport').disabled = !sel.length;
+  const W = $('cmpWarn'); W.innerHTML = '';
+  if (sel.length > 1) {
+    const ranges = new Set(sel.map(c => c.snap.from + '-' + c.snap.to)), bals = new Set(sel.map(c => c.snap.startBal)), strs = new Set(sel.map(c => c.snap.strategyName));
+    if (ranges.size > 1) banner(W, 'warn', 'Chune hue runs ki <b>date range alag</b> hai. Seedha comparison galat ho sakta hai.');
+    if (bals.size > 1) banner(W, 'warn', 'Starting balance alag hai. Isliye % wale numbers (Net %, DD %) dekho.');
+    if (strs.size > 1) banner(W, 'info', 'Alag-alag strategies compare ho rahi hain.');
+  }
+  if (!sel.length) return;
+  let h = '<tr><th>METRIC</th>' + sel.map(c => '<th style="color:' + c.color + '">' + esc(c.label) + '</th>').join('') + '</tr>';
+  cmpCells(sel).forEach(r => h += '<tr><td>' + r.label + '</td>' + r.cells.map(x => '<td class="' + x.cls + '">' + x.txt + '</td>').join('') + '</tr>');
+  $('cmpTbl').innerHTML = h;
+  let mh = '<tr><th>MONTH</th>' + sel.map(c => '<th style="color:' + c.color + '">' + esc(c.label) + '</th>').join('') + '</tr>';
+  cmpMonths(sel).forEach(r => mh += '<tr><td>' + r.month + '</td>' + r.cells.map(x => x ? '<td class="' + signCls(x.pl) + '">' + money(x.pl) + '<br><span style="font-size:10px">' + pctS(x.pct) + '</span></td>' : '<td class="muted">—</td>').join('') + '</tr>');
+  mh += '<tr style="border-top:1px solid var(--gold)"><td><b>TOTAL</b></td>' + sel.map(c => '<td class="' + signCls(c.snap.net) + '"><b>' + money(c.snap.net) + '</b></td>').join('') + '</tr>';
+  $('cmpMonths').innerHTML = mh;
+  $('cmpLegend').innerHTML = sel.map(c => '<span class="pill" style="border-color:' + c.color + ';color:' + c.color + '">' + esc(c.label) + ' ' + pctS(c.snap.netPct) + '</span>').join('');
+  drawCmpChart();
+}
+
+function cmpSeries(sel) {
+  let t0 = Infinity, t1 = -Infinity, lo = 0, hi = 0;
+  const series = sel.map(c => {
+    const s = c.snap, pts = s.eq.map((v, i) => [s.t[i], (v / s.startBal - 1) * 100]);
+    pts.unshift([s.from, 0]);
+    pts.forEach(p => { if (p[0] < t0) t0 = p[0]; if (p[0] > t1) t1 = p[0]; if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; });
+    return { color: c.color, pts };
+  });
+  return { series, t0, t1, lo, hi };
+}
+function drawCmpChart() {
+  const cv = $('cmpChart'); if (!cv.offsetWidth) return;
+  const sel = S.cmp.filter(c => c.sel); if (!sel.length) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.offsetWidth, H = cv.offsetHeight;
+  cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const { series, t0, t1, lo, hi } = cmpSeries(sel);
+  const x = t => (t - t0) / ((t1 - t0) || 1) * (W - 2) + 1, y = v => 8 + (hi - v) / ((hi - lo) || 1) * (H - 16);
+  g.strokeStyle = '#3a3220'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(0, y(0)); g.lineTo(W, y(0)); g.stroke(); g.setLineDash([]);
+  series.forEach(s => { g.strokeStyle = s.color; g.lineWidth = 1.6; g.beginPath(); s.pts.forEach((p, i) => i ? g.lineTo(x(p[0]), y(p[1])) : g.moveTo(x(p[0]), y(p[1]))); g.stroke(); });
+  g.fillStyle = '#8f887a'; g.font = '10px ui-monospace,monospace';
+  g.fillText(pctS(hi), 4, 12); g.fillText(pctS(lo), 4, H - 3);
+  g.textAlign = 'right'; g.fillText(fmtDate(t0) + ' → ' + fmtDate(t1), W - 4, H - 3); g.textAlign = 'left';
+}
+window.addEventListener('resize', () => setTimeout(drawCmpChart, 170));
+
+$('btnCmpExport').onclick = () => {
+  const sel = S.cmp.filter(c => c.sel); if (!sel.length) return;
+  const { series, t0, t1, lo, hi } = cmpSeries(sel), W = 900, H = 260;
+  const x = t => ((t - t0) / ((t1 - t0) || 1) * (W - 2) + 1).toFixed(1), y = v => (8 + (hi - v) / ((hi - lo) || 1) * (H - 16)).toFixed(1);
+  const svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="none" style="height:' + H + 'px;display:block"><line x1="0" x2="' + W + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="#3a3220" stroke-dasharray="4 4"/>' +
+    series.map(s => '<polyline fill="none" stroke="' + s.color + '" stroke-width="1.6" points="' + s.pts.map(p => x(p[0]) + ',' + y(p[1])).join(' ') + '"/>').join('') + '</svg>' +
+    '<div class="ax"><span>' + fmtDate(t0) + ' · max ' + pctS(hi) + '</span><span>min ' + pctS(lo) + ' · ' + fmtDate(t1) + '</span></div>';
+  const head = '<tr><th>METRIC</th>' + sel.map(c => '<th style="color:' + c.color + '">' + esc(c.label) + '</th>').join('') + '</tr>';
+  const rows = cmpCells(sel).map(r => '<tr><td>' + r.label + '</td>' + r.cells.map(c => '<td class="' + (c.cls === 'good' ? 'g' : c.cls === 'badc' ? 'r' : '') + '">' + c.txt + '</td>').join('') + '</tr>').join('');
+  const mrows = cmpMonths(sel).map(r => '<tr><td>' + r.month + '</td>' + r.cells.map(c => c ? '<td class="' + (c.pl > 0 ? 'g' : c.pl < 0 ? 'r' : '') + '">' + money(c.pl) + ' (' + pctS(c.pct) + ')</td>' : '<td>—</td>').join('') + '</tr>').join('') +
+    '<tr><td><b>TOTAL</b></td>' + sel.map(c => '<td class="' + (c.snap.net > 0 ? 'g' : 'r') + '"><b>' + money(c.snap.net) + '</b></td>').join('') + '</tr>';
+  const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SAMU Compare</title><style>' +
+    'body{margin:0;background:#000;color:#e9e4d4;font:14px system-ui,-apple-system,Roboto,sans-serif}main{max-width:1000px;margin:0 auto;padding:16px}' +
+    'h1,h2{font-family:Georgia,"Noto Serif",serif;color:#d4af37;font-weight:600}h1{font-size:28px;margin:4px 0}h2{font-size:20px;margin:24px 0 8px}.k{font-size:10px;letter-spacing:.3em;color:#8a7330}.m{color:#8f887a;font-size:12px;font-family:monospace}' +
+    '.box{background:#0b0b0b;border:1px solid #2a2414;border-radius:12px;padding:10px;overflow-x:auto}.ax{display:flex;justify-content:space-between;color:#8f887a;font:11px monospace}' +
+    'table{border-collapse:collapse;width:100%;font:12px ui-monospace,Menlo,monospace}th{font-size:10px;letter-spacing:.1em;text-align:right;padding:5px 6px;border-bottom:1px solid #2a2414;white-space:nowrap;color:#d4af37}' +
+    'td{text-align:right;padding:5px 6px;border-bottom:1px solid #161309;white-space:nowrap}th:first-child,td:first-child{text-align:left}.g{color:#4fd18b}.r{color:#ff5d5d}</style></head><body><main>' +
+    '<div class="k">SAMU BACKTEST LAB · ' + APP_VERSION + '</div><h1>Compare · ' + sel.length + ' runs</h1><div class="m">generated ' + istNow(Date.now()) + ' IST · ' + [...new Set(sel.map(c => c.snap.strategyName))].map(esc).join(', ') + '</div>' +
+    '<h2>Equity (% return)</h2><div class="box">' + svg + '</div>' +
+    '<h2>Side-by-side</h2><div class="box"><table>' + head + rows + '</table></div><p class="m">Har row mein sabse achha green, sabse bura red.</p>' +
+    '<h2>Mahine-wise P/L</h2><div class="box"><table>' + head.replace('METRIC', 'MONTH') + mrows + '</table></div></main></body></html>';
+  download('samu-compare-' + sel.length + 'runs-' + fmtDate(t0) + '_' + fmtDate(t1) + '.html', html, 'text/html');
+};
+
 /* ===================== boot ===================== */
 (async function boot() {
   S.offset = +(lsGet('samu.offset') || 0); $('offIn').value = S.offset; tickClock();
@@ -1662,6 +1888,8 @@ function buildHtmlReport(r, rep, st) {
   } catch (e) { renderData(); }
 
   renderRunReady(); loadRunSettings(); renderRunReady();
+  try { const cm = await DB.get('cmp'); if (Array.isArray(cm)) S.cmp = cm; } catch (e) {}
+  renderCompare();
   try { const lr = await DB.get('lastRun'); if (lr && lr.eqClose) setReport(lr, false); } catch (e) {}
   const tab = lsGet('samu.tab');
   if (tab) { const b = document.querySelector('#nav button[data-scr="' + tab + '"]'); if (b) b.click(); }
