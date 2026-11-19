@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.0** (branch `feature-v0.6.0`), 19 Nov 2026 — QUAD Basket (4 EA portfolio) backtest
+**v0.6.1** (branch `feature-v0.6.1`), 19 Nov 2026 — GitHub se M1 data
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.1 | 19 Nov 2026 | DATA screen pe **⬇ GitHub se Data**: INVESTOR-ID repo ke `data/m1/<SYMBOL>_M1.json` + `.csv.gz` (raw.githubusercontent, gzip → DecompressionStream) → wahi CSV loader; server GMT offset meta se apne aap. Data INVESTOR-ID v1.13 ka **Scan → 📥 M1 Data lao** banata hai (GitHub Actions + MT5 investor login). Symbol yaad rehta hai |
 | v0.6.0 | 19 Nov 2026 | **QUAD Basket** (`strategies/quad-basket.json`, schema `samu-strategy/2` portfolio): 4 EA — GRID (BUY+SELL, $3 levels), MARTI (H1 EMA trend + M5 Bollinger, 0.01→0.04), PYRAMID (M15 EMA trend + M5 EMA20, profit pe add, SL breakeven), BREAKOUT (H1 high/low stop orders 13:30–23:30 IST). Common exit: cycle ka band + khula P/L = +$10. DD: EA-wise caps, cycle SL $150, freeze −1%, hard stop −2%, peak −4%, max 20 trades, ATR/Friday filters. Presets = EA on/off (ALL, NO_GRID…). Run/Report pe **EA-wise P/L** table + Trades/din; Trades CSV mein `ea` column; Compare mein Trades/din. Strategy screen: **QUAD Basket (4 EA)** button + QUAD form. Rules: `docs/QUAD-RULES.md`. Tests: `tests/quad.test.js` (25) |
 | EA v1.03 | 19 Nov 2026 | **PAPER mode (default)**: `InpLiveTrading = false` → virtual positions (bid/ask se P/L, OrderCalcProfit), broker ko koi order nahi; restart-safe (GV); paper trades CSV `SAMU_UEA_paper_*.csv`; dashboard PAPER P/L + banner; purani asli trade (same magic) ho to warning. Tester mein hamesha normal orders. Ankush: is account pe sirf testing, koi asli trade nahi chahiye |
 | EA v1.02 | 19 Nov 2026 | Dashboard theek: v1.01 laptop (150% DPI, chhoti height) pe bahut chhota + overlap tha. Ab DPI factor (dpi/96) + min scale 0.8 + compact layout (info / table jagah na ho to chhupte hain), panels / bars dikhte rang. Bada number = **EA P/L** (sirf is EA: band trades since + khuli basket), $1000 / account equity hataye (Ankush: doosre EA ka +/- bhi dikh raha tha). Base > account equity ho to warning (trade nahi rokta). Buttons upar daayein |
@@ -85,7 +86,7 @@
 6. Synthetic random data pe QUAD loss deta hai (spread ka kharcha) — asli faisla sirf asli XAUUSDm M1 data se
 
 ## Pending / next
-- [ ] **v0.6.1: "Data lao" — GitHub Actions se XAUUSDm M1 (6 mahine) apne aap repo mein, app ek tap mein load** (Ankush ne Option B final kiya)
+- [x] v0.6.1 "GitHub se Data" (INVESTOR-ID v1.13 M1 export) — INVESTOR-ID PR #28 merge + pehla asli run baaki
 - [ ] QUAD ka asli data pe backtest (Auto + Worst-case, phir NO_GRID/NO_MARTI/… compare)
 - [ ] Achha result → 4 live EA (GRID/MARTI/PYRAMID/BREAKOUT) + SAMU QUAD TESTER, naya repo SAMU-QUAD-BASKET
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
