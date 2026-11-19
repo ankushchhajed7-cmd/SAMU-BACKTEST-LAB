@@ -1,17 +1,18 @@
 //+------------------------------------------------------------------+
-//|                                    SAMU Universal EA v1.02.mq5   |
+//|                                    SAMU Universal EA v1.03.mq5   |
 //|  Reads a SAMU strategy JSON (schema samu-strategy/1) and trades  |
 //|  it with the same rules as SAMU Backtest Lab                     |
 //|  (docs/ENGINE-RULES.md). Gold Luxe full-screen dashboard.        |
 //+------------------------------------------------------------------+
 #property copyright   "SAMU"
-#property version     "1.02"
+#property version     "1.03"
 #property description "SAMU Universal EA: JSON strategy (MQL5\\Files), Supertrend first trade, step grid basket, lot table, basket TP/SL/trailing, daily target/loss, 07:00 IST reset."
 #property tester_file "step-basket.json"
 
 #include <Trade\Trade.mqh>
 
 //--- inputs
+input bool   InpLiveTrading    = false;              // false = PAPER (virtual trades, broker ko order nahi); true = asli trade
 input string InpStrategyFile   = "step-basket.json"; // Strategy JSON (MQL5\Files)
 input bool   InpCommonFolder   = false;              // JSON in Common\Files?
 input string InpPreset         = "";                 // Basket preset override (blank = JSON preset)
@@ -27,7 +28,7 @@ input datetime InpAllocFrom    = 0;                  // Own mode: realized P/L k
 input double InpMinMarginLevel = 300;                // Nayi trade tabhi jab margin level >= ye % (0 = off)
 
 #define EA_NAME    "SAMU Universal EA"
-#define EA_VERSION "v1.02"
+#define EA_VERSION "v1.03"
 #define PFX        "SAMUUEA_"
 #define IST_SEC    19800
 
@@ -540,16 +541,67 @@ bool IsMine()
   {
    return (PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic);
   }
-int CountPos()
+
+//--- PAPER mode: virtual positions (broker ko koi order nahi). Strategy Tester mein hamesha asli (simulated) orders.
+struct VPos { long id; int dir; double lot; double op; datetime ot; };
+VPos   g_vp[];
+long   g_vpNext = 1;
+double g_paperReal = 0;        // paper: band virtual trades ka P/L (since g_since)
+bool   Paper() { return !InpLiveTrading && !MQLInfoInteger(MQL_TESTER); }
+
+double VProfit(const int i, const double bid, const double ask)
+  {
+   double close = (g_vp[i].dir == 1) ? bid : ask, pr = 0;
+   if(!OrderCalcProfit(g_vp[i].dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, g_vp[i].lot, g_vp[i].op, close, pr))
+      pr = g_vp[i].dir * (close - g_vp[i].op) * g_vp[i].lot * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   return pr - g_comm * g_vp[i].lot;
+  }
+void SaveVP()
+  {
+   int n = ArraySize(g_vp);
+   GVSet("vp_n", n); GVSet("vp_next", (double)g_vpNext); GVSet("paperReal", g_paperReal);
+   for(int i = 0; i < n; i++)
+     {
+      string k = "vp" + (string)i + "_";
+      GVSet(k + "id", (double)g_vp[i].id); GVSet(k + "dir", g_vp[i].dir); GVSet(k + "lot", g_vp[i].lot);
+      GVSet(k + "op", g_vp[i].op); GVSet(k + "ot", (double)g_vp[i].ot);
+     }
+  }
+void LoadVP()
+  {
+   int n = (int)GVGet("vp_n", 0);
+   g_vpNext = (long)GVGet("vp_next", 1);
+   g_paperReal = GVGet("paperReal", 0);
+   ArrayResize(g_vp, n);
+   for(int i = 0; i < n; i++)
+     {
+      string k = "vp" + (string)i + "_";
+      g_vp[i].id = (long)GVGet(k + "id", 0); g_vp[i].dir = (int)GVGet(k + "dir", 1); g_vp[i].lot = GVGet(k + "lot", 0.01);
+      g_vp[i].op = GVGet(k + "op", 0); g_vp[i].ot = (datetime)GVGet(k + "ot", 0);
+     }
+  }
+int RealCount()
   {
    int c = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
       if(PositionGetTicket(i) > 0 && IsMine()) c++;
    return c;
   }
+
+int CountPos()
+  {
+   if(Paper()) return ArraySize(g_vp);
+   return RealCount();
+  }
 double BasketPL()
   {
    double pl = 0;
+   if(Paper())
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      for(int i = 0; i < ArraySize(g_vp); i++) pl += VProfit(i, bid, ask);
+      return pl;
+     }
    for(int i = PositionsTotal() - 1; i >= 0; i--)
       if(PositionGetTicket(i) > 0 && IsMine())
          pl += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) - g_comm * PositionGetDouble(POSITION_VOLUME);
@@ -558,6 +610,11 @@ double BasketPL()
 void EntryRange(double &mx, double &mn)
   {
    mx = -DBL_MAX; mn = DBL_MAX;
+   if(Paper())
+     {
+      for(int i = 0; i < ArraySize(g_vp); i++) { if(g_vp[i].op > mx) mx = g_vp[i].op; if(g_vp[i].op < mn) mn = g_vp[i].op; }
+      return;
+     }
    for(int i = PositionsTotal() - 1; i >= 0; i--)
       if(PositionGetTicket(i) > 0 && IsMine())
         {
@@ -569,6 +626,12 @@ void EntryRange(double &mx, double &mn)
 ulong FirstPos(int &dir, double &op)
   {
    datetime best = 0; ulong tk = 0; dir = 0; op = 0;
+   if(Paper())
+     {
+      for(int i = 0; i < ArraySize(g_vp); i++)
+         if(tk == 0 || g_vp[i].ot < best) { best = g_vp[i].ot; tk = (ulong)(i + 1); dir = g_vp[i].dir; op = g_vp[i].op; }
+      return tk;
+     }
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       ulong t = PositionGetTicket(i);
@@ -583,11 +646,36 @@ ulong FirstPos(int &dir, double &op)
      }
    return tk;
   }
+//--- dashboard table rows (real ya paper)
+int CollectRows(int &dir[], double &lot[], double &op[], datetime &ot[], double &pr[])
+  {
+   int n = 0;
+   if(Paper())
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      n = ArraySize(g_vp);
+      ArrayResize(dir, n); ArrayResize(lot, n); ArrayResize(op, n); ArrayResize(ot, n); ArrayResize(pr, n);
+      for(int i = 0; i < n; i++) { dir[i] = g_vp[i].dir; lot[i] = g_vp[i].lot; op[i] = g_vp[i].op; ot[i] = g_vp[i].ot; pr[i] = VProfit(i, bid, ask); }
+      return n;
+     }
+   for(int i = 0; i < PositionsTotal(); i++)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || !IsMine()) continue;
+      ArrayResize(dir, n + 1); ArrayResize(lot, n + 1); ArrayResize(op, n + 1); ArrayResize(ot, n + 1); ArrayResize(pr, n + 1);
+      dir[n] = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      lot[n] = PositionGetDouble(POSITION_VOLUME); op[n] = PositionGetDouble(POSITION_PRICE_OPEN);
+      ot[n] = (datetime)PositionGetInteger(POSITION_TIME); pr[n] = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      n++;
+     }
+   return n;
+  }
 
 //--- own P/L mode: EA ka apna "balance" = allocated + is EA ka realized P/L
 void CalcRealized()
   {
    g_realized = 0; g_realDirty = false;
+   if(Paper()) { g_realized = g_paperReal; return; }
    if(!HistorySelect(g_since, TimeCurrent() + 86400)) { g_realDirty = true; return; }
    int n = HistoryDealsTotal();
    for(int i = 0; i < n; i++)
@@ -622,7 +710,7 @@ double EaNetPL()
 //--- margin guard: purane EAs ka margin na khaaye
 bool MarginOk(const int dir, const double lot, string &why)
   {
-   if(InpMinMarginLevel <= 0) return true;
+   if(InpMinMarginLevel <= 0 || Paper()) return true;
    double price = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID), m = 0;
    if(!OrderCalcMargin(dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, lot, price, m)) return true;
    double used = AccountInfoDouble(ACCOUNT_MARGIN) + m, eq = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -662,6 +750,16 @@ bool OpenTrade(const int dir, const int n)
    double lot = NormLot(g_lotVal[LotIndexFor(n)]);
    string why = "";
    if(!MarginOk(dir, lot, why)) { SetErr(why); return false; }
+   if(Paper())
+     {
+      int k = ArraySize(g_vp); ArrayResize(g_vp, k + 1);
+      g_vp[k].id = g_vpNext++; g_vp[k].dir = dir; g_vp[k].lot = lot;
+      g_vp[k].op = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      g_vp[k].ot = TimeCurrent();
+      if(n >= 2) g_tpActive = false;
+      SaveVP(); SaveState();
+      return true;
+     }
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double tp = 0;
    if(n == 1 && g_tp1On) tp = NormalizeDouble(dir == 1 ? ask + g_tp1 : bid - g_tp1, _Digits);
@@ -687,9 +785,37 @@ bool OpenTrade(const int dir, const int n)
    return true;
   }
 
+void PaperLog(const int i, const double cp, const datetime ct, const double pr, const string reason)
+  {
+   if(!InpLogTrades) return;
+   int h = FileOpen("SAMU_UEA_paper_" + _Symbol + "_" + (string)InpMagic + ".csv", FILE_READ | FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(h == INVALID_HANDLE) return;
+   if(FileSize(h) == 0)
+      FileWriteString(h, "id,basket,dir,lot,open_time_server,open_time_ist,open_price,close_time_server,close_time_ist,close_price,profit,reason\r\n");
+   FileSeek(h, 0, SEEK_END);
+   FileWriteString(h, StringFormat("P%I64d,%I64d,%s,%.2f,%s,%s,%s,%s,%s,%s,%.2f,%s\r\n", g_vp[i].id, g_basketId, g_vp[i].dir == 1 ? "BUY" : "SELL", g_vp[i].lot,
+                                   TStr(g_vp[i].ot), TStr(ToIst(g_vp[i].ot)), DoubleToString(g_vp[i].op, _Digits), TStr(ct), TStr(ToIst(ct)), DoubleToString(cp, _Digits), pr, reason));
+   FileClose(h);
+  }
+
 void CloseAll(const string reason)
   {
    g_closeReason = reason;
+   if(Paper())
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      datetime ct = TimeCurrent();
+      for(int i = 0; i < ArraySize(g_vp); i++)
+        {
+         double pr = VProfit(i, bid, ask);
+         g_paperReal += pr;
+         PaperLog(i, g_vp[i].dir == 1 ? bid : ask, ct, pr, reason);
+        }
+      ArrayResize(g_vp, 0);
+      g_realDirty = true; g_tpActive = false; g_peak = -1e18; g_bMin = 0;
+      SaveVP(); SaveState();
+      return;
+     }
    for(int attempt = 0; attempt < 3; attempt++)
      {
       for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -988,10 +1114,10 @@ void Dash()
    Lbl("srv", "SERVER  " + TimeToString(srv, TIME_SECONDS), P(M + IW), P(28), 10, C_MUT, F_MONO, true);
 
    // EA P/L (sirf is EA ke trades)
-   Lbl("eqT", Spaced("EA P/L"), P(M), P(52), 10, C_GOLD);
+   Lbl("eqT", Spaced(Paper() ? "PAPER P/L" : "EA P/L"), P(M), P(52), 10, C_GOLD);
    Lbl("eq", (net >= 0 ? "+" : "") + Money(net), P(M), P(64), 38, net >= 0 ? C_GOLD : C_BAD, F_SERIF);
    double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-   Lbl("eqS", "Band trades " + Money(g_realized) + "     Khuli basket " + Money(pl) + "     Since " + TimeToString(ToIst(g_since), TIME_DATE) +
+   Lbl("eqS", (Paper() ? "PAPER MODE (koi asli order nahi)     " : "LIVE TRADING     ") + "Band trades " + Money(g_realized) + "     Khuli basket " + Money(pl) + "     Since " + TimeToString(ToIst(g_since), TIME_DATE) +
        "     Margin " + (ml > 0 ? DoubleToString(ml, 0) + "%" : "-"), P(M), P(112), 10, C_MUT);
    Del("eqA");
 
@@ -1005,16 +1131,17 @@ void Dash()
    int sp = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    double accEq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(!g_ready) { al = "CONFIG ERROR: " + g_cfgErr; ac = C_BAD; ab = C'34,8,8'; }
+   else if(Paper() && RealCount() > 0) { al = StringFormat("PAPER MODE  -  magic %I64d ki %d ASLI trade khuli hai (purane version ki): haath se band karo, EA ise nahi chhoota", InpMagic, RealCount()); ac = C_WARN; ab = C'34,24,6'; }
    else if(g_lastErr != "" && TimeCurrent() - g_lastErrT < 60) { al = g_lastErr; ac = C_BAD; ab = C'34,8,8'; }
    else if(g_dayStopped && g_dayStopReason == "DAY_TARGET") { al = "DAILY TARGET HIT  -  07:00 IST tak nayi trade band"; ac = C_OK; ab = C'8,30,20'; }
    else if(g_dayStopped) { al = "DAILY LOSS LIMIT HIT  -  07:00 IST tak trading band"; ac = C_BAD; ab = C'34,8,8'; }
    else if(g_paused) { al = "PAUSED  -  nayi trade band, khuli basket ke TP/SL chal rahe hain"; ac = C_WARN; ab = C'34,24,6'; }
-   else if(InpOwnMode && InpAllocBalance > accEq) { al = StringFormat("DHYAN: base $%.0f > account equity $%.2f  -  daily loss / SL account se bade ho sakte hain", InpAllocBalance, accEq); ac = C_WARN; ab = C'34,24,6'; }
+   else if(!Paper() && InpOwnMode && InpAllocBalance > accEq) { al = StringFormat("DHYAN: base $%.0f > account equity $%.2f  -  daily loss / SL account se bade ho sakte hain", InpAllocBalance, accEq); ac = C_WARN; ab = C'34,24,6'; }
    else if(g_maxSpread > 0 && sp > g_maxSpread) { al = StringFormat("Spread high: %d pts (max %d)  -  nayi basket ruki", sp, g_maxSpread); ac = C_WARN; ab = C'34,24,6'; }
    else if(g_warnMsg != "") { al = g_warnMsg; ac = C_WARN; ab = C'34,24,6'; }
    else if(n == 0 && g_sig == 0) { al = "Supertrend signal ka wait (warmup)"; ac = C_MUT; }
-   else if(n == 0) { al = "READY  -  naye M1 bar pe " + (g_sig == 1 ? "BUY" : "SELL") + " basket khulegi"; ac = C_GOLD2; }
-   else { al = StringFormat("Basket #%I64d chal rahi hai  -  %d / %d trades", g_basketId, n, g_maxT); ac = C_GOLD2; }
+   else if(n == 0) { al = (Paper() ? "PAPER READY  -  naye M1 bar pe virtual " : "READY  -  naye M1 bar pe ") + (g_sig == 1 ? "BUY" : "SELL") + " basket khulegi"; ac = C_GOLD2; }
+   else { al = StringFormat("%sBasket #%I64d chal rahi hai  -  %d / %d trades", Paper() ? "PAPER " : "", g_basketId, n, g_maxT); ac = C_GOLD2; }
    Rect("al", P(M), P(136), P(IW), P(30), ab, ac, 1);
    Lbl("alT", al, P(M + 12), P(143), 11, ac);
 
@@ -1050,7 +1177,7 @@ void Dash()
           Dot() + "Basket TP " + (g_tpOn ? Money(g_tpUsd) : "off") + Dot() + "SL " + (g_slOn ? DoubleToString(g_slPct, 2) + "%" : "off") +
           Dot() + "Trail " + (g_trailOn ? DoubleToString(g_trStart, 0) + "/" + DoubleToString(g_trDrop, 0) : "off"), P(M), P(322), 10, C_MUT);
       Lbl("info2", "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp + " pts" +
-          Dot() + (InpOwnMode ? "Base $" + DoubleToString(InpAllocBalance, 0) + " (sirf % ke liye)" : "Account P/L mode") +
+          Dot() + (Paper() ? "PAPER" : "LIVE") + Dot() + (InpOwnMode ? "Base $" + DoubleToString(InpAllocBalance, 0) + " (sirf % ke liye)" : "Account P/L mode") +
           (InpMinMarginLevel > 0 ? Dot() + "Margin guard " + DoubleToString(InpMinMarginLevel, 0) + "%" : ""), P(M), P(340), 10, C_MUT);
      }
    else { Del("info"); Del("info2"); }
@@ -1065,20 +1192,19 @@ void Dash()
       Rect("thl", P(M), P(388), P(IW), 1, C_LINE, C_LINE, 1);
      }
    else { for(int c = 0; c < 6; c++) Del("th" + (string)c); Del("thl"); }
+   int rd[]; double rl[], ro[], rp[]; datetime rt[];
+   int rn = CollectRows(rd, rl, ro, rt, rp);
    int row = 0;
-   for(int i = 0; i < PositionsTotal() && row < maxRows; i++)
+   for(int i = 0; i < rn && row < maxRows; i++)
      {
-      ulong t = PositionGetTicket(i);
-      if(t == 0 || !IsMine()) continue;
-      bool buy = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY;
-      double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      bool buy = rd[i] == 1;
       double y = 394 + row * 19;
       Lbl("r" + (string)row + "_0", (string)(row + 1), P(cx[0]), P(y), 10, C_MUT, F_MONO);
       Lbl("r" + (string)row + "_1", buy ? "BUY" : "SELL", P(cx[1]), P(y), 10, buy ? C_OK : C_BAD, F_MONO);
-      Lbl("r" + (string)row + "_2", DoubleToString(PositionGetDouble(POSITION_VOLUME), 2), P(cx[2]), P(y), 10, C_TXT, F_MONO);
-      Lbl("r" + (string)row + "_3", DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), _Digits), P(cx[3]), P(y), 10, C_TXT, F_MONO);
-      Lbl("r" + (string)row + "_4", TimeToString(ToIst((datetime)PositionGetInteger(POSITION_TIME)), TIME_MINUTES), P(cx[4]), P(y), 10, C_MUT, F_MONO);
-      Lbl("r" + (string)row + "_5", Money(p), P(cx[5]), P(y), 10, p >= 0 ? C_OK : C_BAD, F_MONO, true);
+      Lbl("r" + (string)row + "_2", DoubleToString(rl[i], 2), P(cx[2]), P(y), 10, C_TXT, F_MONO);
+      Lbl("r" + (string)row + "_3", DoubleToString(ro[i], _Digits), P(cx[3]), P(y), 10, C_TXT, F_MONO);
+      Lbl("r" + (string)row + "_4", TimeToString(ToIst(rt[i]), TIME_MINUTES), P(cx[4]), P(y), 10, C_MUT, F_MONO);
+      Lbl("r" + (string)row + "_5", Money(rp[i]), P(cx[5]), P(y), 10, rp[i] >= 0 ? C_OK : C_BAD, F_MONO, true);
       row++;
      }
    for(int r = row; r < 12; r++)
@@ -1113,8 +1239,14 @@ int OnInit()
    if(InpAllocFrom > 0) g_since = InpAllocFrom;
    else { g_since = (datetime)GVGet("since", 0); if(g_since == 0) { g_since = TimeCurrent(); GVSet("since", (double)g_since); } }
    g_realDirty = true;
+   if(Paper())
+     {
+      LoadVP();
+      if(InpAllocFrom == 0 && GVGet("paperSince", 0) == 0) GVSet("paperSince", (double)TimeCurrent());
+      if(InpAllocFrom == 0) g_since = (datetime)GVGet("paperSince", (double)g_since);
+     }
    string clash = "";
-   if(MagicClash(clash))
+   if(!Paper() && MagicClash(clash))
      {
       g_ready = false; g_cfgErr = clash;
       Print(EA_NAME, ": ", clash); Alert(EA_NAME, ": ", clash);
@@ -1144,7 +1276,8 @@ int OnInit()
      {
       int d; double op; ulong tk = FirstPos(d, op);
       g_firstDir  = d;
-      g_tpActive  = (n == 1 && g_tp1On && PositionSelectByTicket(tk) && PositionGetDouble(POSITION_TP) != 0);
+      if(Paper()) g_tpActive = (n == 1 && g_tp1On && GVGet("tpActive", 0) == 1);
+      else g_tpActive = (n == 1 && g_tp1On && PositionSelectByTicket(tk) && PositionGetDouble(POSITION_TP) != 0);
       g_peak      = GVGet("peak", BasketPL());
       g_bMin      = GVGet("bMin", 0);
       g_bStartBal = GVGet("bStartBal", EaBalance());
@@ -1160,8 +1293,8 @@ int OnInit()
       Dash();
      }
    EventSetTimer(1);
-   PrintFormat("%s %s ready (%s, %s): %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
-               EA_NAME, EA_VERSION, g_cfgSource, InpOwnMode ? "own P/L $" + DoubleToString(InpAllocBalance, 0) : "account P/L", g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
+   PrintFormat("%s %s ready [%s] (%s, %s): %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
+               EA_NAME, EA_VERSION, Paper() ? "PAPER - koi asli order nahi" : "LIVE TRADING", g_cfgSource, InpOwnMode ? "own P/L $" + DoubleToString(InpAllocBalance, 0) : "account P/L", g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
    return INIT_SUCCEEDED;
   }
 

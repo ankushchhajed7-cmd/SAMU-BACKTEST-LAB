@@ -4,11 +4,12 @@
 **v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
 
 ## EA
-**SAMU Universal EA v1.02** (branch `feature-ea-v1.02`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
+**SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| EA v1.03 | 19 Nov 2026 | **PAPER mode (default)**: `InpLiveTrading = false` → virtual positions (bid/ask se P/L, OrderCalcProfit), broker ko koi order nahi; restart-safe (GV); paper trades CSV `SAMU_UEA_paper_*.csv`; dashboard PAPER P/L + banner; purani asli trade (same magic) ho to warning. Tester mein hamesha normal orders. Ankush: is account pe sirf testing, koi asli trade nahi chahiye |
 | EA v1.02 | 19 Nov 2026 | Dashboard theek: v1.01 laptop (150% DPI, chhoti height) pe bahut chhota + overlap tha. Ab DPI factor (dpi/96) + min scale 0.8 + compact layout (info / table jagah na ho to chhupte hain), panels / bars dikhte rang. Bada number = **EA P/L** (sirf is EA: band trades since + khuli basket), $1000 / account equity hataye (Ankush: doosre EA ka +/- bhi dikh raha tha). Base > account equity ho to warning (trade nahi rokta). Buttons upar daayein |
 | EA v1.01 | 19 Nov 2026 | Purane account pe safe: **Own P/L mode** (InpOwnMode, InpAllocBalance $1000, InpAllocFrom) — daily % + basket SL sirf is EA ke trades se; **margin guard** (InpMinMarginLevel 300%); **magic clash check** (khuli + 30 din history); dashboard pe EA equity, account equity, margin level. Ankush: VPS pe nayi account ki jagah nahi → purane $1000 account pe lagayenge |
 | EA v1.00 | 19 Nov 2026 | `ea/SAMU Universal EA v1.00.mq5`: JSON parser (MQL5\Files), same engine rules, Supertrend (SMA/RMA, closed bar), grid + lot table, presets TP/SL/trailing, TP1 (broker + virtual), daily target/loss 07:00 IST, spread/time filters, built-in strategy fallback (JSON file na ho to), restart-safe state (Global Variables), trade log CSV (app ke Trades CSV jaisa), Gold Luxe dashboard (DPI scale, PAUSE / CLOSE ALL, CONFIG ERROR banner). `tests/ea-config.test.js`, `docs/EA-SETUP.md` |
@@ -28,7 +29,7 @@
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
 | `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
-| `ea/SAMU Universal EA v1.02.mq5` | Universal EA |
+| `ea/SAMU Universal EA v1.03.mq5` | Universal EA |
 | `docs/EA-SETUP.md` | EA VPS setup, tester, log |
 | `tests/ea-config.test.js` | EA ke JSON keys = strategy file (`node tests/ea-config.test.js`) |
 | `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 24 tests) |
@@ -66,13 +67,15 @@
 9. (v0.2.0) Jab tak sirf pehla trade hai aur uska TP laga hai, usi side ka grid trade nahi khulta. Warna spread ki wajah se +$5 pe TP se pehle naya BUY khul jaata aur TP kabhi hit nahi hota
 10. (v0.2.0) Nayi basket sirf naye M1 bar ke open pe khulti hai (EA bhi yahi karega)
 11. (v0.2.0) Supertrend ATR = SMA (MT5 iATR) default; `rma` option. (19 Nov: Ankush ne default = SMA confirm kiya)
+15. (EA v1.03) Default PAPER mode — live chart pe sirf virtual trades; asli trade sirf InpLiveTrading = true se (Ankush ka faisla: backtest / testing account pe koi asli trade nahi)
 14. (EA v1.00) EA strategy JSON `MQL5\Files\step-basket.json` se padhta hai (Common folder optional). Config galat ho to live chart pe CONFIG ERROR banner, tester mein init fail
 12. (v0.2.0) Max DD = floating equity (bar ke low tak) pe, closed-equity peak se
 13. (v0.3.0) Din ka P/L = agle din ki start equity − is din ki start equity (floating shamil), isliye saare din jod ke = net. Mahina = trading day (IST, 7 AM) ka mahina
 
 ## Pending / next
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
-- [ ] **EA v1.02 compile + dashboard screenshot** → OK ho to `feature-ea-v1.02` main mein merge
+- [ ] **EA v1.03 compile + PAPER dashboard screenshot** → OK ho to `feature-ea-v1.03` main mein merge (v1.02 bhi isi mein)
+- [ ] v1.01 ki asli SELL 0.01 XAUUSDm (13:29 IST, magic 770100) haath se band karni hai
 - [ ] Account equity confirm karo: agar sach mein ~$53 hai to base $1000 ke saath daily loss $50 = poora account
 - [ ] EA v1.02 tester (1 minute OHLC) vs app (Auto path) same data pe compare
 - [ ] Parity screen (EA trade log vs app), EA ka log format fix hone ke baad

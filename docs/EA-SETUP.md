@@ -1,4 +1,4 @@
-# SAMU Universal EA v1.02 — VPS setup
+# SAMU Universal EA v1.03 — VPS setup
 
 ## 0. VPS Helper (automatic)
 EA ki file `samusignal` repo ke `vps-ea/` folder mein, main branch pe hai. **SamuSignal VPS Helper** 2 min mein use VPS ke har MT5 terminal ke `MQL5\Experts` mein daal ke compile kar deta hai. Compile ka result: SamuSignal app → **COPY tab → VPS Helper**.
@@ -6,7 +6,7 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
 
 ## 1. Files copy karo (haath se, agar helper nahi)
 1. MT5 → **File → Open Data Folder**
-2. `MQL5\Experts\` mein daalo: **`SAMU Universal EA v1.02.mq5`** (repo ka `ea/` folder)
+2. `MQL5\Experts\` mein daalo: **`SAMU Universal EA v1.03.mq5`** (repo ka `ea/` folder)
 3. `MQL5\Files\` mein daalo: **`step-basket.json`** (repo ka `strategies/` folder)
    - App ke Strategy screen se **JSON download** karke bhi daal sakte ho (form mein badli settings ke saath)
 
@@ -16,10 +16,11 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
 
 ## 3. Chart pe lagao
 1. **XAUUSDm M1** chart kholo (EA ka timeframe M1 hi rakho; Supertrend apne aap M15 se padhta hai)
-2. Navigator → Expert Advisors → **SAMU Universal EA v1.02** → chart pe drag
+2. Navigator → Expert Advisors → **SAMU Universal EA v1.03** → chart pe drag
 3. Inputs:
    | Input | Default | Matlab |
    |---|---|---|
+   | **InpLiveTrading** | **false** | **false = PAPER**: virtual trades, broker ko koi order nahi. true = asli trade |
    | InpStrategyFile | step-basket.json | MQL5\Files mein JSON ka naam |
    | InpCommonFolder | false | true = Common\Files se padhe |
    | InpPreset | (khaali) | A/B/C… likho to JSON ka preset override |
@@ -33,6 +34,14 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
    | InpAllocFrom | 0 | Own mode: realized P/L kab se gine (0 = pehli baar chalne se) |
    | InpMinMarginLevel | 300 | Margin level is % se neeche ho to nayi trade nahi (0 = off) |
 4. **Algo Trading** button ON
+
+## 3a. PAPER mode (default, v1.03)
+- `InpLiveTrading = false` → EA live chart pe poore rules se chalta hai lekin trades **virtual** hain: broker ko koi order nahi, account ka balance / margin nahi badalta.
+- Dashboard: **PAPER P/L**, banner "PAPER …". Paper trades ka log: `MQL5\Files\SAMU_UEA_paper_<symbol>_<magic>.csv` (app ke Trades CSV jaise columns).
+- Paper P/L = bid/ask spread ke saath, slippage nahi.
+- Purane version ki koi **asli** trade (same magic) khuli ho to banner batata hai — EA use nahi chhoota, haath se band karo.
+- Strategy Tester mein hamesha normal (simulated) orders, taaki tester report bane.
+- Asli trading: `InpLiveTrading = true` (khud badalna padega).
 
 ## 3b. Purane account pe (doosre EAs ke saath)
 - **InpOwnMode = true** (default). EA ka apna balance = `InpAllocBalance` + is EA ka band trades ka P/L. Daily +1% / −5% aur basket SL 1% isi se naapte hain → doosre EAs ka profit / loss asar nahi karta.
@@ -54,7 +63,7 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
 - Config galat ho to banner pe laal **CONFIG ERROR** + wajah (EA trade nahi karega)
 
 ## 5. Strategy Tester (app se milane ke liye)
-- Expert: SAMU Universal EA v1.02 · Symbol XAUUSDm · Period **M1**
+- Expert: SAMU Universal EA v1.03 · Symbol XAUUSDm · Period **M1**
 - Model: **"1 minute OHLC"** = app ke **Auto (MT5)** path jaisa · **"Every tick based on real ticks"** = sabse asli
 - `step-basket.json` tester apne aap copy karta hai (`#property tester_file`). Doosra naam use karo to `MQL5\Files` mein hona chahiye aur tester ke liye naam `step-basket.json` hi rakho
 - Deposit = app ka starting balance (jaise 1000)
