@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>SAMU Backtest Lab</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{
+  --bg:#000; --panel:#0b0b0b; --panel2:#121212; --line:#2a2414;
+  --gold:#d4af37; --gold2:#f3d77a; --golddim:#8a7330;
+  --txt:#e9e4d4; --mut:#8f887a; --ok:#4fd18b; --bad:#ff5d5d; --warn:#ffb547;
+  --serif: "Cormorant Garamond","Playfair Display","Noto Serif",Georgia,"Times New Roman",serif;
+  --sans: system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+  --mono: ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;-webkit-text-size-adjust:100%}
+body{padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+a{color:var(--gold2)}
+.wrap{max-width:900px;margin:0 auto;padding:0 14px}
+
+/* header */
+header{position:sticky;top:0;z-index:5;background:linear-gradient(#000 80%,rgba(0,0,0,.85));border-bottom:1px solid var(--line);padding:10px 0 8px}
+.hrow{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.brand .lbl{font-size:10px;letter-spacing:.32em;color:var(--golddim)}
+.brand h1{margin:2px 0 0;font-family:var(--serif);font-weight:600;color:var(--gold);font-size:24px;letter-spacing:.04em;line-height:1}
+.brand h1 small{font-family:var(--sans);font-size:10px;color:var(--mut);letter-spacing:.1em;margin-left:6px}
+.clocks{text-align:right;font-family:var(--mono);font-size:11px;color:var(--mut);line-height:1.5}
+.clocks b{color:var(--gold2);font-weight:500}
+
+/* labels/cards */
+.lbl{font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:var(--gold)}
+h2.sec{font-family:var(--serif);color:var(--gold);font-weight:600;font-size:22px;margin:18px 0 4px}
+.sub{color:var(--mut);font-size:13px;margin:0 0 12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media(min-width:620px){.grid{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;min-width:0}
+.stat .v{font-family:var(--serif);font-size:21px;color:var(--gold2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .n{font-size:11px;color:var(--mut);margin-top:2px}
+.big{font-family:var(--serif);font-size:38px;color:var(--gold);line-height:1.05}
+
+/* banners */
+.banner{border-radius:10px;padding:9px 12px;margin:10px 0;font-size:13px;border:1px solid}
+.banner.ok{border-color:#1f5a3c;background:#07160f;color:#bff0d4}
+.banner.warn{border-color:#6b4a12;background:#1a1206;color:#ffe2b0}
+.banner.bad{border-color:#6b1d1d;background:#1a0707;color:#ffc9c9}
+.banner.info{border-color:var(--line);background:#0e0c06;color:var(--txt)}
+
+/* controls */
+.btn{appearance:none;border:1px solid var(--gold);background:transparent;color:var(--gold);border-radius:10px;padding:10px 14px;font-size:13px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;font-family:var(--sans)}
+.btn.solid{background:var(--gold);color:#000;font-weight:600}
+.btn.small{padding:6px 10px;font-size:11px}
+.btn:disabled{opacity:.4}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.drop{border:1.5px dashed var(--golddim);border-radius:12px;padding:22px 12px;text-align:center;color:var(--mut);cursor:pointer}
+.drop b{color:var(--gold)}
+.drop.hover{border-color:var(--gold2);background:#0e0c06}
+input[type=number],input[type=text],select,textarea{background:#050505;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px;font-family:var(--sans)}
+textarea{width:100%;min-height:340px;font-family:var(--mono);font-size:12px;line-height:1.45}
+.field{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #161309}
+.field:last-child{border-bottom:0}
+.field label{font-size:13px;color:var(--txt)}
+.field .hint{font-size:11px;color:var(--mut)}
+.field input{width:110px;text-align:right}
+
+/* progress */
+.bar{height:6px;background:#1a1609;border-radius:4px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--golddim),var(--gold2));transition:width .15s}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{font-size:9.5px;letter-spacing:.2em;color:var(--gold);text-align:right;font-weight:500;padding:6px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{text-align:right;padding:6px;border-bottom:1px solid #161309;font-family:var(--mono);white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--mut)}
+.good{color:var(--ok)} .badc{color:var(--bad)} .warnc{color:var(--warn)}
+canvas{display:block;width:100%;height:170px}
+ul.plain{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.6}
+details summary{cursor:pointer;color:var(--gold);font-size:12px;letter-spacing:.15em;text-transform:uppercase;padding:4px 0}
+.pill{display:inline-block;border:1px solid var(--golddim);border-radius:20px;padding:2px 9px;font-size:11px;color:var(--gold2);margin:2px 4px 2px 0}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1;min-width:70px}
+.seg button.on{background:var(--gold);color:#000;font-weight:600}
+
+/* nav */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:#000;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--mut);padding:10px 2px 9px;font-size:9.5px;letter-spacing:.2em;cursor:pointer;font-family:var(--sans)}
+nav button .ic{display:block;font-size:17px;margin-bottom:3px;letter-spacing:0}
+nav button.on{color:var(--gold)}
+section.scr{display:none}
+section.scr.on{display:block}
+.soon{text-align:center;padding:30px 12px}
+.soon .big{font-size:30px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap hrow">
+    <div class="brand">
+      <div class="lbl">SAMU</div>
+      <h1>Backtest Lab<small id="appVer">v0.1.0</small></h1>
+    </div>
+    <div class="clocks">
+      IST <b id="clkIst">--:--:--</b><br>
+      SERVER <b id="clkSrv">--:--:--</b>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ================= DATA ================= -->
+<section class="scr on" id="scr-data">
+  <h2 class="sec">Data</h2>
+  <p class="sub">MT5 → View → Symbols → Bars → M1 → Request → Export. Wo CSV yahan upload karo.</p>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      <div style="font-size:26px;color:var(--gold)">⬆</div>
+      <b>CSV file chuno</b><br><span style="font-size:12px">ya yahan drop karo · UTF-16 / UTF-8, tab / comma dono chalega</span>
+    </div>
+    <input type="file" id="fileIn" accept=".csv,.txt,text/csv,text/plain" class="hide">
+    <div id="loadProg" class="hide">
+      <div class="mono muted" id="loadMsg" style="margin-top:10px">Padh raha hoon…</div>
+      <div class="bar"><i id="loadBar"></i></div>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <div><label>Server GMT offset (ghante)</label><div class="hint">Exness = 0. IST = server + 5:30</div></div>
+      <input type="number" id="offIn" step="0.5" value="0">
+    </div>
+    <div class="field">
+      <div><label>Point size</label><div class="hint">Auto-detect · XAUUSDm = 0.001</div></div>
+      <input type="number" id="pointIn" step="any" value="">
+    </div>
+  </div>
+
+  <div id="dataEmpty" class="banner info">Abhi koi data load nahi hai.</div>
+
+  <div id="dataOut" class="hide">
+    <div id="dataBanners"></div>
+
+    <div class="card">
+      <div class="lbl">Dataset</div>
+      <div class="big" id="dsBars">0</div>
+      <div class="muted mono" id="dsName" style="margin-top:4px"></div>
+      <div class="btns">
+        <button class="btn small" id="btnClear">Data hatao</button>
+      </div>
+    </div>
+
+    <div class="grid" id="statGrid"></div>
+
+    <div class="card">
+      <div class="lbl">Close price</div>
+      <canvas id="chart"></canvas>
+      <div class="mono muted" id="chartAxis" style="display:flex;justify-content:space-between;margin-top:4px"></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Mahine-wise coverage</div>
+      <div class="scroll"><table class="tbl" id="monthTbl"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Mahina = server time. Trading day = 7:00 AM IST se agle 7:00 AM IST tak.</div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">Bade gaps (weekend + daily break chhod ke)</div>
+      <div class="scroll"><table class="tbl" id="gapTbl"></table></div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Parse details</summary>
+        <div class="mono muted" id="parseInfo" style="white-space:pre-wrap;margin-top:6px"></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ================= STRATEGY ================= -->
+<section class="scr" id="scr-strategy">
+  <h2 class="sec">Strategy</h2>
+  <p class="sub">JSON strategy file. Wahi file baad mein Universal EA bhi padhega.</p>
+
+  <div class="card">
+    <div class="lbl">Active</div>
+    <div class="big" id="stName" style="font-size:30px">—</div>
+    <div class="muted mono" id="stMeta" style="margin-top:4px"></div>
+    <div class="btns">
+      <button class="btn small" id="btnBuiltIn">Step Basket (built-in)</button>
+      <button class="btn small" id="btnUploadJson">JSON upload</button>
+      <button class="btn small" id="btnDownloadJson">JSON download</button>
+    </div>
+    <input type="file" id="jsonIn" accept=".json,application/json" class="hide">
+  </div>
+
+  <div class="card">
+    <div class="lbl">Basket preset</div>
+    <div class="seg" id="presetSeg" style="margin-top:8px"></div>
+    <div class="muted" id="presetDesc" style="font-size:12px;margin-top:8px"></div>
+  </div>
+
+  <div id="stBanners"></div>
+
+  <div class="card">
+    <div class="lbl">Rules (saaf bhasha mein)</div>
+    <ul class="plain" id="stSummary"></ul>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Raw JSON edit</summary>
+      <textarea id="stText" spellcheck="false"></textarea>
+      <div class="btns">
+        <button class="btn solid small" id="btnApplyJson">Apply</button>
+        <button class="btn small" id="btnFormatJson">Format</button>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ================= RUN ================= -->
+<section class="scr" id="scr-run">
+  <h2 class="sec">Run</h2>
+  <div class="card soon">
+    <div class="lbl">Coming in v0.2.0</div>
+    <div class="big">Engine</div>
+    <p class="muted" style="font-size:13px">M1 OHLC simulation · intrabar path O→L→H→C / O→H→L→C / Worst-case · spread CSV ya fixed · Supertrend M15 (closed bar) · Step Basket A/B/C</p>
+    <div id="runReady" class="mono" style="font-size:12px"></div>
+  </div>
+</section>
+
+<!-- ================= REPORT ================= -->
+<section class="scr" id="scr-report">
+  <h2 class="sec">Report</h2>
+  <div class="card soon">
+    <div class="lbl">Coming in v0.3.0</div>
+    <div class="big">Report</div>
+    <p class="muted" style="font-size:13px">Net profit · Max DD · Profit factor · Win rate · Equity curve · Mahine-wise / din-wise P/L · Trade list · Basket list</p>
+  </div>
+</section>
+
+<!-- ================= COMPARE ================= -->
+<section class="scr" id="scr-compare">
+  <h2 class="sec">Compare</h2>
+  <div class="card soon">
+    <div class="lbl">Coming in v0.4.0</div>
+    <div class="big">A · B · C</div>
+    <p class="muted" style="font-size:13px">Do ya zyada runs side-by-side · equity curves ek saath · HTML / CSV export</p>
+  </div>
+</section>
+
+</main>
+
+<nav id="nav">
+  <button data-scr="data" class="on"><span class="ic">▤</span>DATA</button>
+  <button data-scr="strategy"><span class="ic">◈</span>STRATEGY</button>
+  <button data-scr="run"><span class="ic">▶</span>RUN</button>
+  <button data-scr="report"><span class="ic">▥</span>REPORT</button>
+  <button data-scr="compare"><span class="ic">⇆</span>COMPARE</button>
+</nav>
+
+<script>
+'use strict';
+const APP_VERSION = 'v0.1.0';
+const IST_OFFSET_SEC = 19800;      // +5:30
+const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
+
+/* ===================== helpers ===================== */
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const fmtInt = n => Math.round(n).toLocaleString('en-IN');
+const fmtNum = (n, d = 2) => (n == null || !isFinite(n)) ? '—' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// All bar times are stored as "server seconds" (server wall clock treated as UTC).
+function fmtSec(sec, withSec) {
+  const d = new Date(sec * 1000);
+  return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + ' ' +
+    pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + (withSec ? ':' + pad(d.getUTCSeconds()) : '');
+}
+const fmtDate = sec => fmtSec(sec).slice(0, 10);
+const serverToIst = (srvSec, offH) => srvSec - offH * 3600 + IST_OFFSET_SEC;
+// Trading-day key: IST day that starts at 07:00 IST
+const tradingDayKey = (srvSec, offH) => fmtDate(serverToIst(srvSec, offH) - DAY_RESET_SEC);
+function fmtDur(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60), r = m % 60;
+  if (h < 48) return h + 'h' + (r ? ' ' + r + 'm' : '');
+  return (h / 24).toFixed(1) + 'd';
+}
+function banner(el, kind, html) {
+  const d = document.createElement('div');
+  d.className = 'banner ' + kind; d.innerHTML = html; el.appendChild(d);
+}
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+/* ===================== state ===================== */
+const S = {
+  ds: null,        // dataset {name,size,t,o,h,l,c,s,meta}
+  stats: null,
+  offset: 0,
+  point: null,
+  strategy: null,
+  stratSource: ''
+};
+
+/* ===================== clock ===================== */
+function tickClock() {
+  const nowUtc = Math.floor(Date.now() / 1000);
+  const ist = new Date((nowUtc + IST_OFFSET_SEC) * 1000);
+  const srv = new Date((nowUtc + S.offset * 3600) * 1000);
+  const t = d => pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds());
+  $('clkIst').textContent = t(ist);
+  $('clkSrv').textContent = t(srv);
+}
+setInterval(tickClock, 1000);
+
+/* ===================== nav ===================== */
+$('nav').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section.scr').forEach(s => s.classList.toggle('on', s.id === 'scr-' + b.dataset.scr));
+  lsSet('samu.tab', b.dataset.scr);
+  if (b.dataset.scr === 'data' && S.ds) drawChart();
+  if (b.dataset.scr === 'run') renderRunReady();
+  window.scrollTo(0, 0);
+});
+
+/* ===================== CSV parsing ===================== */
+function decodeBuffer(buf) {
+  const u8 = new Uint8Array(buf);
+  let enc = 'utf-8', start = 0;
+  if (u8[0] === 0xFF && u8[1] === 0xFE) { enc = 'utf-16le'; start = 2; }
+  else if (u8[0] === 0xFE && u8[1] === 0xFF) { enc = 'utf-16be'; start = 2; }
+  else if (u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF) { enc = 'utf-8'; start = 3; }
+  else {
+    // no BOM: many zero bytes at odd positions => UTF-16LE
+    let z = 0; const n = Math.min(u8.length, 2000);
+    for (let i = 1; i < n; i += 2) if (u8[i] === 0) z++;
+    if (n > 20 && z > n / 4) enc = 'utf-16le';
+  }
+  return { text: new TextDecoder(enc).decode(u8.subarray(start)), encoding: enc };
+}
+
+const RE_YMD = /^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/;
+const RE_DMY = /^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/;
+const RE_TIME = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+
+function parseDateTok(s) {
+  let m = RE_YMD.exec(s); if (m) return [+m[1], +m[2], +m[3]];
+  m = RE_DMY.exec(s); if (m) return [+m[3], +m[2], +m[1]];
+  return null;
+}
+function parseTimeTok(s) {
+  const m = RE_TIME.exec(s); if (!m) return null;
+  return [+m[1], +m[2], m[3] ? +m[3] : 0];
+}
+function toSec(d, t) { return Date.UTC(d[0], d[1] - 1, d[2], t[0], t[1], t[2]) / 1000; }
+
+function detectDelimiter(line) {
+  const c = { '\t': 0, ',': 0, ';': 0 };
+  for (const ch of line) if (ch in c) c[ch]++;
+  let best = '\t';
+  for (const k in c) if (c[k] > c[best]) best = k;
+  if (c[best] === 0) return /\s+/; // whitespace separated
+  return best;
+}
+
+function buildColumnMap(headerToks) {
+  const map = {};
+  headerToks.forEach((raw, i) => {
+    const k = raw.replace(/[<>"]/g, '').trim().toLowerCase();
+    if (k === 'date') map.date = i;
+    else if (k === 'time') map.time = i;
+    else if (k === 'datetime' || k === 'date time' || k === 'timestamp') map.datetime = i;
+    else if (k === 'open' || k === 'o') map.open = i;
+    else if (k === 'high' || k === 'h') map.high = i;
+    else if (k === 'low' || k === 'l') map.low = i;
+    else if (k === 'close' || k === 'c') map.close = i;
+    else if (k === 'tickvol' || k === 'tick_volume' || k === 'tickvolume') map.tickvol = i;
+    else if (k === 'vol' || k === 'volume' || k === 'real_volume') map.vol = i;
+    else if (k === 'spread') map.spread = i;
+  });
+  return map;
+}
+
+function guessColumnMap(toks) {
+  // no header: figure out if date+time are separate or combined
+  if (parseDateTok(toks[0]) && parseTimeTok(toks[1] || '')) {
+    return { date: 0, time: 1, open: 2, high: 3, low: 4, close: 5, tickvol: 6, vol: 7, spread: toks.length >= 9 ? 8 : undefined };
+  }
+  const sp = toks[0].split(/\s+/);
+  if (sp.length === 2 && parseDateTok(sp[0]) && parseTimeTok(sp[1])) {
+    return { datetime: 0, open: 1, high: 2, low: 3, close: 4, tickvol: 5, vol: 6, spread: toks.length >= 8 ? 7 : undefined };
+  }
+  return null;
+}
+
+async function parseCsv(text, onProgress) {
+  const lines = text.split(/\r?\n/);
+  let first = 0; while (first < lines.length && !lines[first].trim()) first++;
+  if (first >= lines.length) throw new Error('File khaali hai.');
+  const delim = detectDelimiter(lines[first]);
+  const split = l => (delim instanceof RegExp ? l.trim().split(delim) : l.split(delim)).map(x => x.trim());
+
+  const t0 = split(lines[first]);
+  let map, hasHeader = false;
+  if (/[a-z]/i.test(t0[0]) && !parseDateTok(t0[0].split(/\s+/)[0])) {
+    hasHeader = true; map = buildColumnMap(t0);
+  } else {
+    map = guessColumnMap(t0);
+  }
+  if (!map || map.open == null || map.high == null || map.low == null || map.close == null ||
+      (map.datetime == null && (map.date == null || map.time == null))) {
+    throw new Error('Columns samajh nahi aaye. Pehli line: "' + lines[first].slice(0, 120) + '"');
+  }
+  const commaDecimal = delim !== ',';
+
+  const N = lines.length;
+  const t = new Float64Array(N), o = new Float64Array(N), h = new Float64Array(N),
+        l = new Float64Array(N), c = new Float64Array(N), s = new Float32Array(N);
+  const hasSpread = map.spread != null;
+  let n = 0, skipped = 0, maxDec = 0;
+  const badSamples = [];
+  const num = x => { if (x == null) return NaN; if (commaDecimal && x.indexOf(',') >= 0 && x.indexOf('.') < 0) x = x.replace(',', '.'); return +x; };
+
+  const startRow = first + (hasHeader ? 1 : 0);
+  const CHUNK = 20000;
+  for (let i = startRow; i < N; i++) {
+    const line = lines[i];
+    if (!line || !line.trim()) continue;
+    const tk = split(line);
+    let d, tm;
+    if (map.datetime != null) {
+      const sp = (tk[map.datetime] || '').split(/\s+/);
+      d = parseDateTok(sp[0]); tm = parseTimeTok(sp[1] || '00:00');
+    } else {
+      d = parseDateTok(tk[map.date] || ''); tm = parseTimeTok(tk[map.time] || '');
+    }
+    const O = num(tk[map.open]), H = num(tk[map.high]), L = num(tk[map.low]), C = num(tk[map.close]);
+    if (!d || !tm || !isFinite(O) || !isFinite(H) || !isFinite(L) || !isFinite(C)) {
+      skipped++; if (badSamples.length < 3) badSamples.push((i + 1) + ': ' + line.slice(0, 90)); continue;
+    }
+    t[n] = toSec(d, tm); o[n] = O; h[n] = H; l[n] = L; c[n] = C;
+    s[n] = hasSpread ? (num(tk[map.spread]) || 0) : 0;
+    if (n < 3000) {
+      const ct = tk[map.close]; const p = ct.search(/[.,]/);
+      if (p >= 0) maxDec = Math.max(maxDec, ct.length - p - 1);
+    }
+    n++;
+    if ((i & (CHUNK - 1)) === 0 && onProgress) { onProgress(i / N); await new Promise(r => setTimeout(r, 0)); }
+  }
+  if (n === 0) throw new Error('Ek bhi valid bar nahi mila. ' + (badSamples[0] || ''));
+
+  // sort if needed + remove duplicates
+  let outOfOrder = 0;
+  for (let i = 1; i < n; i++) if (t[i] < t[i - 1]) outOfOrder++;
+  let idx = null;
+  if (outOfOrder) { idx = Array.from({ length: n }, (_, i) => i).sort((a, b) => t[a] - t[b]); }
+  const T = new Float64Array(n), Oo = new Float64Array(n), Hh = new Float64Array(n), Ll = new Float64Array(n), Cc = new Float64Array(n), Ss = new Float32Array(n);
+  let m = 0, dups = 0;
+  for (let k = 0; k < n; k++) {
+    const i = idx ? idx[k] : k;
+    if (m > 0 && t[i] === T[m - 1]) { dups++; continue; }
+    T[m] = t[i]; Oo[m] = o[i]; Hh[m] = h[i]; Ll[m] = l[i]; Cc[m] = c[i]; Ss[m] = s[i]; m++;
+  }
+  return {
+    t: T.slice(0, m), o: Oo.slice(0, m), h: Hh.slice(0, m), l: Ll.slice(0, m), c: Cc.slice(0, m),
+    s: hasSpread ? Ss.slice(0, m) : null,
+    meta: {
+      delimiter: delim instanceof RegExp ? 'space' : (delim === '\t' ? 'tab' : delim),
+      hasHeader, columns: map, hasSpread, skipped, badSamples, outOfOrder, dups,
+      decimals: maxDec, headerLine: lines[first].slice(0, 160)
+    }
+  };
+}
+
+/* ===================== analysis ===================== */
+function analyze(ds, offH, point, stepPrice) {
+  const { t, o, h, l, c, s } = ds; const n = t.length;
+  // timeframe = most common diff
+  const diffCount = new Map();
+  for (let i = 1; i < Math.min(n, 5000); i++) { const d = t[i] - t[i - 1]; diffCount.set(d, (diffCount.get(d) || 0) + 1); }
+  let tf = 60, best = 0; diffCount.forEach((v, k) => { if (v > best) { best = v; tf = k; } });
+
+  let badOhlc = 0, minP = Infinity, maxP = -Infinity, rangeSum = 0, rangeMax = 0, bigRange = 0;
+  let spSum = 0, spMax = 0, spMin = Infinity, spZero = 0;
+  const gaps = []; let weekendGaps = 0, dailyBreaks = 0, missingBars = 0;
+  const months = new Map(); const days = new Set();
+  for (let i = 0; i < n; i++) {
+    const O = o[i], H = h[i], L = l[i], C = c[i];
+    if (H < Math.max(O, C) - 1e-9 || L > Math.min(O, C) + 1e-9 || H < L) badOhlc++;
+    if (L < minP) minP = L; if (H > maxP) maxP = H;
+    const r = H - L; rangeSum += r; if (r > rangeMax) rangeMax = r; if (r >= stepPrice) bigRange++;
+    if (s) { const v = s[i]; spSum += v; if (v > spMax) spMax = v; if (v < spMin) spMin = v; if (v === 0) spZero++; }
+    const dk = tradingDayKey(t[i], offH); days.add(dk);
+    const mk = fmtSec(t[i]).slice(0, 7);
+    let M = months.get(mk);
+    if (!M) { M = { bars: 0, days: new Set(), open: O, close: C, high: H, low: L, sp: 0 }; months.set(mk, M); }
+    M.bars++; M.days.add(dk); M.close = C; if (H > M.high) M.high = H; if (L < M.low) M.low = L; if (s) M.sp += s[i];
+    if (i > 0) {
+      const d = t[i] - t[i - 1];
+      if (d > tf) {
+        const a = new Date(t[i - 1] * 1000).getUTCDay(), b = new Date(t[i] * 1000).getUTCDay();
+        const weekend = d >= 20 * 3600 && (a === 5 || a === 6) && (b === 0 || b === 1);
+        // gold daily break: ~1h gap starting 20:00-23:59 UTC
+        const utcH = new Date((t[i - 1] - offH * 3600) * 1000).getUTCHours();
+        const dailyBreak = !weekend && d <= 3 * 3600 && utcH >= 20;
+        if (weekend) weekendGaps++;
+        else if (dailyBreak) dailyBreaks++;
+        else { missingBars += Math.round(d / tf) - 1; if (d >= 30 * 60) gaps.push({ from: t[i - 1], to: t[i], dur: d }); }
+      }
+    }
+  }
+  gaps.sort((x, y) => y.dur - x.dur);
+  return {
+    n, tf, first: t[0], last: t[n - 1], badOhlc, minP, maxP,
+    rangeAvg: rangeSum / n, rangeMax, bigRange, stepPrice,
+    spread: s ? { avg: spSum / n, max: spMax, min: spMin, zeroPct: spZero / n * 100, avgPrice: spSum / n * point, maxPrice: spMax * point } : null,
+    gaps: gaps.slice(0, 12), gapCount: gaps.length, weekendGaps, dailyBreaks, missingBars,
+    tradingDays: days.size, months
+  };
+}
+
+/* ===================== IndexedDB ===================== */
+const DB = {
+  open() {
+    return new Promise((res, rej) => {
+      let r; try { r = indexedDB.open('samu-lab', 1); } catch (e) { return rej(e); }
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async put(k, v) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); },
+  async get(k) { const db = await this.open(); return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
+  async del(k) { const db = await this.open(); return new Promise(res => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete = res; tx.onerror = res; }); }
+};
+
+/* ===================== DATA screen ===================== */
+const drop = $('drop'), fileIn = $('fileIn');
+drop.onclick = () => fileIn.click();
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hover'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hover'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
+fileIn.onchange = () => { const f = fileIn.files[0]; if (f) loadFile(f); fileIn.value = ''; };
+
+$('offIn').onchange = () => {
+  S.offset = +$('offIn').value || 0; lsSet('samu.offset', S.offset); tickClock();
+  if (S.ds) { refreshStats(); persistDataset(); }
+};
+$('pointIn').onchange = () => {
+  const v = +$('pointIn').value; S.point = v > 0 ? v : null;
+  if (S.ds) { refreshStats(); persistDataset(); }
+};
+$('btnClear').onclick = async () => {
+  if (!confirm('Loaded data hata dein?')) return;
+  S.ds = null; S.stats = null; try { await DB.del('dataset'); } catch (e) {}
+  renderData();
+};
+
+async function loadFile(f) {
+  $('loadProg').classList.remove('hide'); $('loadBar').style.width = '3%';
+  $('loadMsg').textContent = 'Padh raha hoon: ' + f.name + ' (' + (f.size / 1048576).toFixed(1) + ' MB)…';
+  try {
+    const buf = await f.arrayBuffer();
+    const { text, encoding } = decodeBuffer(buf);
+    $('loadMsg').textContent = 'Parse ho raha hai… (' + encoding + ')';
+    const ds = await parseCsv(text, p => { $('loadBar').style.width = Math.max(3, p * 100).toFixed(0) + '%'; });
+    ds.meta.encoding = encoding; ds.name = f.name; ds.size = f.size; ds.loadedAt = Date.now();
+    S.ds = ds;
+    S.point = null; $('pointIn').value = '';
+    $('loadBar').style.width = '100%';
+    refreshStats();
+    persistDataset();
+    setTimeout(() => $('loadProg').classList.add('hide'), 400);
+  } catch (err) {
+    $('loadProg').classList.add('hide');
+    S.ds = null; renderData();
+    const b = $('dataBanners'); $('dataOut').classList.add('hide'); $('dataEmpty').className = 'banner bad';
+    $('dataEmpty').innerHTML = '<b>Load fail:</b> ' + esc(err.message || err);
+  }
+}
+
+async function persistDataset() {
+  if (!S.ds) return;
+  try {
+    const d = S.ds;
+    await DB.put('dataset', { name: d.name, size: d.size, loadedAt: d.loadedAt, meta: d.meta, t: d.t, o: d.o, h: d.h, l: d.l, c: d.c, s: d.s, offset: S.offset, point: S.point });
+  } catch (e) { /* storage not available: app still works for this session */ }
+}
+
+function effectivePoint() {
+  if (S.point) return S.point;
+  if (S.ds && S.ds.meta.decimals) return Math.pow(10, -S.ds.meta.decimals);
+  return (S.strategy && S.strategy.point) || 0.001;
+}
+function stepPrice() { return (S.strategy && S.strategy.grid && +S.strategy.grid.step_price) || 5; }
+
+function refreshStats() {
+  S.stats = analyze(S.ds, S.offset, effectivePoint(), stepPrice());
+  renderData();
+}
+
+function renderData() {
+  const has = !!S.ds;
+  $('dataOut').classList.toggle('hide', !has);
+  $('dataEmpty').classList.toggle('hide', has);
+  if (!has) { $('dataEmpty').className = 'banner info'; $('dataEmpty').textContent = 'Abhi koi data load nahi hai.'; return; }
+  const d = S.ds, st = S.stats, m = d.meta, pt = effectivePoint();
+  if (!S.point) $('pointIn').placeholder = pt;
+
+  $('dsBars').textContent = fmtInt(st.n) + ' bars';
+  $('dsName').textContent = d.name + ' · ' + (d.size / 1048576).toFixed(1) + ' MB · TF ' + (st.tf % 60 === 0 ? 'M' + st.tf / 60 : st.tf + 's');
+
+  // banners
+  const B = $('dataBanners'); B.innerHTML = '';
+  const problems = [];
+  if (st.tf !== 60) problems.push(['bad', 'Ye <b>M1</b> data nahi lagta (TF = ' + st.tf + 's). Engine ko M1 chahiye.']);
+  if (!m.hasSpread) problems.push(['warn', '<b>Spread column nahi mila.</b> RUN mein fixed spread dena padega.']);
+  else if (st.spread.zeroPct > 50) problems.push(['warn', 'Spread ' + st.spread.zeroPct.toFixed(0) + '% bars mein 0 hai. Fixed spread use karna better rahega.']);
+  if (st.badOhlc) problems.push(['warn', fmtInt(st.badOhlc) + ' bars mein OHLC galat hai (High &lt; Low jaisa).']);
+  if (m.skipped) problems.push(['warn', fmtInt(m.skipped) + ' lines skip hui (parse nahi hui).']);
+  if (m.dups) problems.push(['info', fmtInt(m.dups) + ' duplicate bars hataye.']);
+  if (m.outOfOrder) problems.push(['info', 'Data ulte order mein tha, sort kar diya.']);
+  const coverage = st.n / Math.max(1, st.n + st.missingBars) * 100;
+  if (coverage < 97) problems.push(['warn', 'Weekend/daily break chhod ke ' + (100 - coverage).toFixed(1) + '% minutes missing hain (' + fmtInt(st.missingBars) + ' bars).']);
+  if (!problems.length) problems.push(['ok', '✓ Data theek hai: M1, spread available, koi bada problem nahi.']);
+  problems.forEach(p => banner(B, p[0], p[1]));
+  if (st.bigRange > 0) banner(B, 'info', '⚠ <b>' + fmtInt(st.bigRange) + '</b> M1 bars ki range ≥ $' + st.stepPrice +
+    ' (step) hai. In bars mein ek se zyada grid level hit ho sakte hain, isliye intrabar path (aur Worst-case) se result badlega.');
+
+  const offTxt = (S.offset >= 0 ? '+' : '') + S.offset;
+  const stats = [
+    ['From (server)', fmtSec(st.first), 'IST ' + fmtSec(serverToIst(st.first, S.offset))],
+    ['To (server)', fmtSec(st.last), 'IST ' + fmtSec(serverToIst(st.last, S.offset))],
+    ['Trading days', fmtInt(st.tradingDays), '7:00 AM IST reset · GMT' + offTxt],
+    ['Coverage', coverage.toFixed(1) + '%', fmtInt(st.missingBars) + ' missing · ' + st.weekendGaps + ' wknd · ' + st.dailyBreaks + ' daily breaks'],
+    ['Price range', fmtNum(st.minP, 0) + '–' + fmtNum(st.maxP, 0), 'point ' + pt + ' · move $' + fmtNum(st.maxP - st.minP, 0)],
+    ['Avg bar range', '$' + fmtNum(st.rangeAvg, 2), 'max $' + fmtNum(st.rangeMax, 2)],
+    ['Avg spread', st.spread ? fmtNum(st.spread.avg, 1) + ' pts' : '—', st.spread ? '≈ $' + fmtNum(st.spread.avgPrice, 3) + ' price' : 'column missing'],
+    ['Max spread', st.spread ? fmtInt(st.spread.max) + ' pts' : '—', st.spread ? '≈ $' + fmtNum(st.spread.maxPrice, 3) + ' · min ' + fmtInt(st.spread.min) : '']
+  ];
+  $('statGrid').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
+
+  // month table
+  let mh = '<tr><th>MONTH</th><th>BARS</th><th>DAYS</th><th>OPEN</th><th>CLOSE</th><th>HIGH</th><th>LOW</th><th>SPRD</th></tr>';
+  st.months.forEach((M, k) => {
+    const chg = M.close - M.open;
+    mh += '<tr><td>' + k + '</td><td>' + fmtInt(M.bars) + '</td><td>' + M.days.size + '</td><td>' + fmtNum(M.open) + '</td><td class="' +
+      (chg >= 0 ? 'good' : 'badc') + '">' + fmtNum(M.close) + '</td><td>' + fmtNum(M.high) + '</td><td>' + fmtNum(M.low) + '</td><td>' +
+      (d.s ? fmtNum(M.sp / M.bars, 0) : '—') + '</td></tr>';
+  });
+  $('monthTbl').innerHTML = mh;
+
+  // gaps
+  let gh = '<tr><th>FROM (SERVER)</th><th>TO</th><th>GAP</th></tr>';
+  if (!st.gaps.length) gh += '<tr><td colspan="3" class="muted">30 min se bada koi gap nahi.</td></tr>';
+  st.gaps.forEach(g => gh += '<tr><td>' + fmtSec(g.from) + '</td><td>' + fmtSec(g.to).slice(5) + '</td><td>' + fmtDur(g.dur) + '</td></tr>');
+  if (st.gapCount > st.gaps.length) gh += '<tr><td colspan="3" class="muted">+ ' + (st.gapCount - st.gaps.length) + ' aur (≥30 min)</td></tr>';
+  $('gapTbl').innerHTML = gh;
+
+  // parse info
+  const cols = Object.entries(m.columns).filter(e => e[1] != null).map(e => e[0] + '=' + e[1]).join(' ');
+  $('parseInfo').textContent =
+    'Encoding : ' + m.encoding + '\nDelimiter: ' + m.delimiter + '\nHeader   : ' + (m.hasHeader ? 'haan' : 'nahi') +
+    '\nColumns  : ' + cols + '\nDecimals : ' + m.decimals + '\nPehli line: ' + m.headerLine +
+    (m.badSamples.length ? '\nSkipped examples:\n  ' + m.badSamples.join('\n  ') : '');
+
+  drawChart();
+}
+
+function drawChart() {
+  const cv = $('chart'); if (!S.ds || !cv.offsetWidth) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.offsetWidth, H = cv.offsetHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const { c, t } = S.ds, n = c.length, cols = Math.max(2, Math.floor(W));
+  const mins = new Float64Array(cols).fill(Infinity), maxs = new Float64Array(cols).fill(-Infinity);
+  for (let i = 0; i < n; i++) { const x = Math.floor(i / n * cols); if (c[i] < mins[x]) mins[x] = c[i]; if (c[i] > maxs[x]) maxs[x] = c[i]; }
+  let lo = Infinity, hi = -Infinity; for (let x = 0; x < cols; x++) { if (mins[x] < lo) lo = mins[x]; if (maxs[x] > hi) hi = maxs[x]; }
+  const pad = 8, y = v => pad + (hi - v) / ((hi - lo) || 1) * (H - 2 * pad);
+  g.strokeStyle = '#1d190d'; g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) { const yy = pad + k * (H - 2 * pad) / 4; g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke(); }
+  g.strokeStyle = '#d4af37'; g.lineWidth = 1.4; g.beginPath();
+  for (let x = 0; x < cols; x++) { if (!isFinite(mins[x])) continue; g.moveTo(x + .5, y(maxs[x])); g.lineTo(x + .5, y(mins[x]) + .5); }
+  g.stroke();
+  g.fillStyle = '#8f887a'; g.font = '10px ui-monospace,monospace';
+  g.fillText(fmtNum(hi), 4, 12); g.fillText(fmtNum(lo), 4, H - 3);
+  $('chartAxis').innerHTML = '<span>' + fmtDate(t[0]) + '</span><span>' + fmtDate(t[n - 1]) + '</span>';
+}
+let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(drawChart, 150); });
+
+/* ===================== STRATEGY screen ===================== */
+const BUILTIN_STRATEGY = {"schema":"samu-strategy/1","name":"Step Basket","version":"1.0.0","notes":"Supertrend sirf pehle trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.","symbol":"XAUUSDm","contract_size":100,"point":0.001,"server_gmt_offset_hours":0,"entry":{"type":"supertrend","tf":"M15","atr_period":10,"multiplier":3,"use_closed_bar":true,"role":"first_trade_direction"},"first_trade":{"tp_price":5,"remove_tp_on_second_trade":true},"grid":{"step_price":5,"sell_below_lowest":true,"buy_above_highest":true,"max_trades":12,"after_max":"wait_tp_sl"},"lots":[{"from":1,"to":3,"lot":0.01},{"from":4,"to":6,"lot":0.02},{"from":7,"to":9,"lot":0.03},{"from":10,"to":12,"lot":0.04}],"basket":{"preset":"B","sl_base":"balance_at_basket_start","presets":{"A":{"tp_usd":10,"sl_pct_balance":null,"trail":null},"B":{"tp_usd":null,"sl_pct_balance":1,"trail":{"start_usd":10,"drop_usd":5}},"C":{"tp_usd":10,"sl_pct_balance":1,"trail":null}}},"daily":{"target_pct":1,"loss_pct":5,"base":"day_start_equity","reset_time":"07:00","tz":"IST","on_hit":"close_all_stop_day","open_basket_at_reset":"keep"},"costs":{"commission_per_lot":0,"swap":false},"filters":{"max_spread_points":0,"time":{"enabled":false,"from":"00:00","to":"23:59","tz":"IST"},"news":{"enabled":false,"before_min":30,"after_min":30}}};
+
+function validateStrategy(st) {
+  const err = [], warn = [];
+  const need = (cond, msg) => { if (!cond) err.push(msg); };
+  const pos = v => typeof v === 'number' && v > 0;
+  need(st && typeof st === 'object', 'JSON object nahi hai');
+  if (err.length) return { err, warn };
+  need(st.schema === 'samu-strategy/1', 'schema "samu-strategy/1" hona chahiye');
+  need(typeof st.name === 'string' && st.name, 'name missing');
+  need(pos(st.contract_size), 'contract_size > 0 chahiye');
+  need(pos(st.point), 'point > 0 chahiye');
+  need(typeof st.server_gmt_offset_hours === 'number', 'server_gmt_offset_hours number chahiye');
+  const e = st.entry || {};
+  need(['supertrend', 'ema', 'sma', 'rsi'].includes(e.type), 'entry.type: supertrend/ema/sma/rsi');
+  need(/^(M1|M5|M15|M30|H1|H4|D1)$/.test(e.tf || ''), 'entry.tf galat (M1..D1)');
+  if (e.type === 'supertrend') { need(pos(e.atr_period), 'entry.atr_period > 0'); need(pos(e.multiplier), 'entry.multiplier > 0'); }
+  if (e.use_closed_bar === false) warn.push('entry.use_closed_bar = false → live bar signal repaint kar sakta hai');
+  const g = st.grid || {};
+  need(pos(g.step_price), 'grid.step_price > 0');
+  need(Number.isInteger(g.max_trades) && g.max_trades > 0, 'grid.max_trades integer > 0');
+  const lots = Array.isArray(st.lots) ? st.lots.slice().sort((a, b) => a.from - b.from) : [];
+  need(lots.length > 0, 'lots table khaali hai');
+  let expect = 1;
+  lots.forEach(r => {
+    if (r.from !== expect) err.push('lots: trade ' + expect + ' ka lot missing/overlap');
+    if (!pos(r.lot)) err.push('lots: ' + r.from + '-' + r.to + ' lot > 0 chahiye');
+    if (r.to < r.from) err.push('lots: ' + r.from + '-' + r.to + ' ulta range');
+    expect = r.to + 1;
+  });
+  if (lots.length && Number.isInteger(g.max_trades) && expect - 1 < g.max_trades) err.push('lots table sirf trade ' + (expect - 1) + ' tak hai, max_trades ' + g.max_trades);
+  const b = st.basket || {};
+  need(b.presets && b.presets[b.preset], 'basket.preset "' + b.preset + '" presets mein nahi hai');
+  if (b.presets) Object.entries(b.presets).forEach(([k, p]) => {
+    if (p.tp_usd == null && p.sl_pct_balance == null && !p.trail) warn.push('Preset ' + k + ': na TP, na SL, na trailing');
+    if (p.tp_usd == null && p.trail == null) warn.push('Preset ' + k + ': profit lene ka koi rule nahi');
+    if (p.sl_pct_balance == null) warn.push('Preset ' + k + ': basket SL nahi hai (sirf daily loss bachayega)');
+    if (p.trail && !(pos(p.trail.start_usd) && pos(p.trail.drop_usd))) err.push('Preset ' + k + ': trail.start_usd / drop_usd > 0');
+  });
+  const d = st.daily || {};
+  need(typeof d.target_pct === 'number' && typeof d.loss_pct === 'number', 'daily.target_pct / loss_pct number chahiye');
+  need(/^\d{2}:\d{2}$/.test(d.reset_time || ''), 'daily.reset_time "HH:MM" chahiye');
+  return { err, warn };
+}
+
+function presetText(p) {
+  const parts = [];
+  parts.push(p.tp_usd != null ? 'Basket +$' + p.tp_usd + ' pe sab close' : 'Fixed TP nahi');
+  parts.push(p.sl_pct_balance != null ? 'SL = balance ka ' + p.sl_pct_balance + '%' : 'Basket SL nahi');
+  parts.push(p.trail ? 'Trailing: +$' + p.trail.start_usd + ' pe start, peak se $' + p.trail.drop_usd + ' girte hi close' : 'Trailing nahi');
+  return parts.join(' · ');
+}
+
+function summarize(st) {
+  const e = st.entry, g = st.grid, d = st.daily, b = st.basket, p = b.presets[b.preset];
+  const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
+  const L = [];
+  L.push('Symbol <b>' + esc(st.symbol) + '</b>, contract ' + st.contract_size + ' (0.01 lot pe $1 move = $' + (0.01 * st.contract_size).toFixed(2) + ').');
+  if (e.type === 'supertrend') L.push('Pehla trade <b>Supertrend ' + e.tf + ' (ATR ' + e.atr_period + ', ×' + e.multiplier + ')</b> ki direction mein' + (e.use_closed_bar ? ', closed bar se' : '') + '.');
+  if (st.first_trade) L.push('Pehle trade ka TP <b>$' + st.first_trade.tp_price + '</b> price' + (st.first_trade.remove_tp_on_second_trade ? '; doosra trade khulte hi ye TP hat jaata hai.' : '.'));
+  L.push('Grid step <b>$' + g.step_price + '</b>: ' + (g.sell_below_lowest ? 'sabse neeche wale entry se neeche SELL' : '') + (g.sell_below_lowest && g.buy_above_highest ? ', ' : '') + (g.buy_above_highest ? 'sabse upar wale se upar BUY' : '') + '.');
+  L.push('Lot (basket ki ginti se): ' + lotTxt + '. Max <b>' + g.max_trades + '</b> trades' + (g.after_max === 'wait_tp_sl' ? ', uske baad sirf TP/SL ka wait.' : '.'));
+  L.push('Basket preset <b>' + esc(b.preset) + '</b>: ' + presetText(p) + (p.sl_pct_balance != null && b.sl_base === 'balance_at_basket_start' ? ' (balance = basket start ka)' : '') + '.');
+  L.push('Daily target <b>' + d.target_pct + '%</b>, daily loss <b>' + d.loss_pct + '%</b> (day-start equity). Hit hote hi sab close, din band. Naya din <b>' + d.reset_time + ' ' + d.tz + '</b>' + (d.open_basket_at_reset === 'keep' ? '; reset pe khuli basket chalti rahegi.' : '.'));
+  L.push('Costs: commission $' + st.costs.commission_per_lot + '/lot, swap ' + (st.costs.swap ? 'on' : 'off') + '.');
+  const f = st.filters || {};
+  L.push('Filters: spread ' + (f.max_spread_points ? '≤ ' + f.max_spread_points + ' pts' : 'off') + ', time ' + (f.time && f.time.enabled ? f.time.from + '–' + f.time.to + ' ' + f.time.tz : 'off') + ', news ' + (f.news && f.news.enabled ? 'on' : 'off') + '.');
+  return L;
+}
+
+function setStrategy(st, source, keepText) {
+  S.strategy = st; S.stratSource = source;
+  lsSet('samu.strategy', JSON.stringify(st));
+  renderStrategy(keepText);
+  if (S.ds) refreshStats();
+}
+
+function renderStrategy(keepText) {
+  const st = S.strategy, B = $('stBanners'); B.innerHTML = '';
+  if (!st) { $('stName').textContent = '—'; return; }
+  const v = validateStrategy(st);
+  $('stName').textContent = st.name || '—';
+  $('stMeta').textContent = 'v' + (st.version || '?') + ' · ' + (st.symbol || '') + ' · ' + S.stratSource;
+  if (v.err.length) banner(B, 'bad', '<b>Errors:</b><ul class="plain">' + v.err.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>');
+  else banner(B, 'ok', '✓ Strategy valid hai.');
+  if (v.warn.length) banner(B, 'warn', '<b>Dhyan do:</b><ul class="plain">' + v.warn.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>');
+
+  const seg = $('presetSeg'), b = st.basket || {};
+  seg.innerHTML = '';
+  Object.keys(b.presets || {}).forEach(k => {
+    const btn = document.createElement('button');
+    btn.className = 'btn small' + (k === b.preset ? ' on' : ''); btn.textContent = k;
+    btn.onclick = () => { st.basket.preset = k; setStrategy(st, S.stratSource); };
+    seg.appendChild(btn);
+  });
+  $('presetDesc').textContent = b.presets && b.presets[b.preset] ? presetText(b.presets[b.preset]) : '';
+  $('stSummary').innerHTML = v.err.length ? '<li class="badc">Pehle errors theek karo.</li>' : summarize(st).map(x => '<li>' + x + '</li>').join('');
+  if (!keepText) $('stText').value = JSON.stringify(st, null, 2);
+}
+
+async function loadBuiltIn() {
+  let st = null, src = 'built-in';
+  try { const r = await fetch('strategies/step-basket.json', { cache: 'no-cache' }); if (r.ok) { st = await r.json(); src = 'strategies/step-basket.json'; } } catch (e) {}
+  if (!st && BUILTIN_STRATEGY) st = JSON.parse(JSON.stringify(BUILTIN_STRATEGY));
+  if (st) setStrategy(st, src);
+  else banner($('stBanners'), 'bad', 'Built-in strategy load nahi hui (offline aur cache khaali).');
+}
+
+$('btnBuiltIn').onclick = loadBuiltIn;
+$('btnUploadJson').onclick = () => $('jsonIn').click();
+$('jsonIn').onchange = async () => {
+  const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
+  try { setStrategy(JSON.parse(await f.text()), f.name); }
+  catch (e) { $('stBanners').innerHTML = ''; banner($('stBanners'), 'bad', 'JSON parse error: ' + esc(e.message)); }
+};
+$('btnDownloadJson').onclick = () => {
+  if (!S.strategy) return;
+  const blob = new Blob([JSON.stringify(S.strategy, null, 2) + '\n'], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = (S.strategy.name || 'strategy').toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.json';
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+$('btnApplyJson').onclick = () => {
+  try { setStrategy(JSON.parse($('stText').value), 'edited', true); }
+  catch (e) { $('stBanners').innerHTML = ''; banner($('stBanners'), 'bad', 'JSON parse error: ' + esc(e.message)); }
+};
+$('btnFormatJson').onclick = () => {
+  try { $('stText').value = JSON.stringify(JSON.parse($('stText').value), null, 2); } catch (e) { alert('JSON galat: ' + e.message); }
+};
+
+/* ===================== RUN placeholder ===================== */
+function renderRunReady() {
+  const okD = !!S.ds, okS = !!S.strategy && !validateStrategy(S.strategy).err.length;
+  $('runReady').innerHTML = '<span class="' + (okD ? 'good' : 'badc') + '">' + (okD ? '✓' : '✗') + ' Data</span> &nbsp; ' +
+    '<span class="' + (okS ? 'good' : 'badc') + '">' + (okS ? '✓' : '✗') + ' Strategy</span>';
+}
+
+/* ===================== boot ===================== */
+(async function boot() {
+  S.offset = +(lsGet('samu.offset') || 0); $('offIn').value = S.offset; tickClock();
+
+  const saved = lsGet('samu.strategy');
+  if (saved) { try { setStrategy(JSON.parse(saved), 'saved'); } catch (e) { await loadBuiltIn(); } }
+  else await loadBuiltIn();
+
+  try {
+    const d = await DB.get('dataset');
+    if (d && d.t && d.t.length) {
+      S.ds = d; if (d.point) { S.point = d.point; $('pointIn').value = d.point; }
+      refreshStats();
+    } else renderData();
+  } catch (e) { renderData(); }
+
+  const tab = lsGet('samu.tab');
+  if (tab) { const b = document.querySelector('#nav button[data-scr="' + tab + '"]'); if (b) b.click(); }
+
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
