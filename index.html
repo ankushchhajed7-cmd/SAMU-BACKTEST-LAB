@@ -82,6 +82,8 @@ textarea{width:100%;min-height:340px;font-family:var(--mono);font-size:12px;line
 .muted{color:var(--mut)}
 .good{color:var(--ok)} .badc{color:var(--bad)} .warnc{color:var(--warn)}
 canvas{display:block;width:100%;height:170px}
+input[type=date]{color-scheme:dark}
+select{min-width:120px}
 ul.plain{margin:6px 0 0;padding-left:18px;font-size:13px;line-height:1.6}
 details summary{cursor:pointer;color:var(--gold);font-size:12px;letter-spacing:.15em;text-transform:uppercase;padding:4px 0}
 .pill{display:inline-block;border:1px solid var(--golddim);border-radius:20px;padding:2px 9px;font-size:11px;color:var(--gold2);margin:2px 4px 2px 0}
@@ -107,7 +109,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.1.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.2.0</small></h1>
     </div>
     <div class="clocks">
       IST <b id="clkIst">--:--:--</b><br>
@@ -230,11 +232,58 @@ section.scr.on{display:block}
 <!-- ================= RUN ================= -->
 <section class="scr" id="scr-run">
   <h2 class="sec">Run</h2>
-  <div class="card soon">
-    <div class="lbl">Coming in v0.2.0</div>
-    <div class="big">Engine</div>
-    <p class="muted" style="font-size:13px">M1 OHLC simulation · intrabar path O→L→H→C / O→H→L→C / Worst-case · spread CSV ya fixed · Supertrend M15 (closed bar) · Step Basket A/B/C</p>
-    <div id="runReady" class="mono" style="font-size:12px"></div>
+  <p class="sub">M1 OHLC simulation. Bar ke andar price ka raasta (path) chuno, ya Worst-case.</p>
+
+  <div class="card">
+    <div class="lbl">Ready</div>
+    <div id="runReady" class="mono" style="font-size:12px;margin:4px 0 6px"></div>
+    <div class="field"><div><label>Starting balance ($)</label></div><input type="number" id="rBal" value="1000" step="100"></div>
+    <div class="field"><div><label>Basket preset</label></div><select id="rPreset"></select></div>
+    <div class="field"><div><label>Intrabar path</label><div class="hint">Auto = MT5 jaisa (bull bar O→L→H→C, bear O→H→L→C)</div></div>
+      <select id="rPath"><option value="auto">Auto (MT5)</option><option value="olhc">O→L→H→C</option><option value="ohlc">O→H→L→C</option><option value="worst">Worst-case</option></select></div>
+    <div class="field"><div><label>Spread</label><div class="hint">CSV = har bar ka MT5 spread</div></div>
+      <select id="rSpMode"><option value="csv">CSV</option><option value="fixed">Fixed</option></select></div>
+    <div class="field" id="rSpRow"><div><label>Fixed spread (points)</label><div class="hint">200 pts = $0.20 (XAUUSDm)</div></div><input type="number" id="rSpPts" value="200" step="10"></div>
+    <div class="field"><div><label>From (server date)</label></div><input type="date" id="rFrom"></div>
+    <div class="field"><div><label>To (server date)</label></div><input type="date" id="rTo"></div>
+    <div class="btns">
+      <button class="btn solid" id="btnRun">▶ Run</button>
+      <button class="btn" id="btnMatrix">A/B/C × Paths</button>
+    </div>
+    <div id="runProg" class="hide"><div class="mono muted" id="runMsg" style="margin-top:10px"></div><div class="bar"><i id="runBar"></i></div></div>
+  </div>
+
+  <div id="runErr"></div>
+
+  <div id="runOut" class="hide">
+    <div class="card">
+      <div class="lbl" id="rTitle">Result</div>
+      <div class="big" id="rNet">—</div>
+      <div class="muted mono" id="rMeta" style="margin-top:4px"></div>
+    </div>
+    <div class="grid" id="rStats"></div>
+    <div class="card">
+      <div class="lbl">Equity</div>
+      <canvas id="eqChart"></canvas>
+      <div class="mono muted" id="eqAxis" style="display:flex;justify-content:space-between;margin-top:4px"></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Basket close reasons</div>
+      <div id="rReasons" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Last 30 baskets</div>
+      <div class="scroll"><table class="tbl" id="rBaskets"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Poori trade list, mahine/din-wise P/L: v0.3.0 Report mein.</div>
+    </div>
+  </div>
+
+  <div id="mxOut" class="hide">
+    <div class="card">
+      <div class="lbl">Matrix: preset × path</div>
+      <div class="scroll"><table class="tbl" id="mxTbl"></table></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Faisla Worst-case row se lo: jo preset worst-case mein bhi theek ho, wahi live ke layak hai.</div>
+    </div>
   </div>
 </section>
 
@@ -268,9 +317,313 @@ section.scr.on{display:block}
   <button data-scr="compare"><span class="ic">⇆</span>COMPARE</button>
 </nav>
 
+<script id="engine">
+/* ===================== SAMU ENGINE v0.2.0 =====================
+   Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
+   (Universal EA must follow the same rules for parity). */
+var SamuEngine = (function () {
+  'use strict';
+  var EPS = 1e-7;
+  var TF = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400 };
+  var IST = 19800;
+
+  /* ---------- indicators ---------- */
+  function resample(t, o, h, l, c, sec) {
+    var R = { t: [], o: [], h: [], l: [], c: [] }, k = -1, cur = -1;
+    for (var i = 0; i < t.length; i++) {
+      var s = Math.floor(t[i] / sec) * sec;
+      if (s !== cur) { cur = s; k++; R.t.push(s); R.o.push(o[i]); R.h.push(h[i]); R.l.push(l[i]); R.c.push(c[i]); }
+      else { if (h[i] > R.h[k]) R.h[k] = h[i]; if (l[i] < R.l[k]) R.l[k] = l[i]; R.c[k] = c[i]; }
+    }
+    return R;
+  }
+
+  // method 'sma' = MT5 iATR (simple average of TR); 'rma' = Wilder (TradingView)
+  function atr(h, l, c, period, method) {
+    var n = h.length, tr = new Float64Array(n), out = new Float64Array(n).fill(NaN), sum = 0;
+    for (var i = 0; i < n; i++) {
+      tr[i] = i === 0 ? h[i] - l[i] : Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
+      if (method === 'rma') {
+        if (i < period) { sum += tr[i]; if (i === period - 1) out[i] = sum / period; }
+        else out[i] = (out[i - 1] * (period - 1) + tr[i]) / period;
+      } else {
+        sum += tr[i]; if (i >= period) sum -= tr[i - period];
+        if (i >= period - 1) out[i] = sum / period;
+      }
+    }
+    return out;
+  }
+
+  // Standard Supertrend. trend[i]: 1 up, -1 down, 0 not ready.
+  function supertrend(h, l, c, period, mult, method) {
+    var n = h.length, a = atr(h, l, c, period, method), trend = new Int8Array(n);
+    var fu = NaN, fd = NaN, tr = 0, ready = false;
+    for (var i = 0; i < n; i++) {
+      if (isNaN(a[i])) continue;
+      var hl2 = (h[i] + l[i]) / 2, up = hl2 - mult * a[i], dn = hl2 + mult * a[i];
+      if (!ready) { fu = up; fd = dn; tr = 1; ready = true; trend[i] = tr; continue; }
+      var nfu = c[i - 1] > fu ? Math.max(up, fu) : up;
+      var nfd = c[i - 1] < fd ? Math.min(dn, fd) : dn;
+      if (tr === -1 && c[i] > fd) tr = 1; else if (tr === 1 && c[i] < fu) tr = -1;
+      fu = nfu; fd = nfd; trend[i] = tr;
+    }
+    return { trend: trend, atr: a };
+  }
+
+  /* ---------- run ---------- */
+  function run(ds, st, opt) {
+    opt = opt || {};
+    var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s;
+    var N = T.length;
+    var cs = st.contract_size, point = opt.point || st.point;
+    var off = (opt.offset != null ? opt.offset : st.server_gmt_offset_hours) || 0;
+    var presetKey = opt.preset || st.basket.preset, P = st.basket.presets[presetKey];
+    var tpUsd = P.tp_usd, slPct = P.sl_pct_balance, trail = P.trail;
+    var step = st.grid.step_price, maxT = st.grid.max_trades;
+    var buyAbove = st.grid.buy_above_highest !== false, sellBelow = st.grid.sell_below_lowest !== false;
+    var ft = st.first_trade || {};
+    var tp1 = ft.tp_price != null ? ft.tp_price : null;
+    var sameSideWhileTp = !!ft.grid_same_side_while_tp;
+    var d = st.daily || {};
+    var dTgt = d.target_pct || 0, dLoss = d.loss_pct || 0;
+    var rp = (d.reset_time || '07:00').split(':'), resetSec = (+rp[0]) * 3600 + (+rp[1]) * 60;
+    var comm = (st.costs && st.costs.commission_per_lot) || 0;
+    var f = st.filters || {}, maxSpPts = f.max_spread_points || 0;
+    var tf = f.time && f.time.enabled ? f.time : null;
+    var lots = st.lots.slice().sort(function (a, b) { return a.from - b.from; });
+    function lotFor(k) { for (var i = 0; i < lots.length; i++) if (k >= lots[i].from && k <= lots[i].to) return lots[i].lot; return lots[lots.length - 1].lot; }
+    var pathMode = opt.path || 'auto';
+    var spreadFixed = opt.spreadMode === 'fixed' || !SP;
+    var fixedSpr = (opt.fixedPts != null ? opt.fixedPts : 200) * point;
+
+    if (st.entry.type !== 'supertrend') throw new Error('v0.2.0 engine abhi sirf supertrend entry support karta hai');
+    var tfs = TF[st.entry.tf]; if (!tfs) throw new Error('entry.tf galat');
+    var R = resample(T, O, H, L, C, tfs);
+    var STR = supertrend(R.h, R.l, R.c, st.entry.atr_period, st.entry.multiplier, st.entry.atr_method || 'sma');
+    var warm = st.entry.warmup_bars != null ? st.entry.warmup_bars : 50;
+    var useClosed = st.entry.use_closed_bar !== false;
+
+    // range
+    var i0 = 0, i1 = N - 1;
+    if (opt.from != null) while (i0 < N && T[i0] < opt.from) i0++;
+    if (opt.to != null) while (i1 >= 0 && T[i1] >= opt.to) i1--;
+    if (i1 < i0) throw new Error('Is date range mein data nahi hai');
+
+    var startBal = opt.balance || 1000;
+    var trades = [], baskets = [], dayStops = [], days = [];
+    var eqClose = new Float64Array(i1 - i0 + 1), eqLow = new Float64Array(i1 - i0 + 1), barT = new Float64Array(i1 - i0 + 1);
+
+    var S = {
+      bal: startBal, pos: [], A: 0, K: 0, nextTid: 1, bId: 0, bOpenT: 0, bStartBal: 0, peak: -Infinity, bMin: 0, maxN: 0,
+      tpOn: false, firstDir: 0, maxE: 0, minE: 0, dayKey: null, dayStartEq: startBal, dayStopped: false, eqMin: Infinity, ev: []
+    };
+    function clone(s) {
+      var c = {}; for (var k in s) c[k] = s[k];
+      c.pos = s.pos.map(function (p) { return { id: p.id, dir: p.dir, lot: p.lot, op: p.op, ot: p.ot }; });
+      c.ev = []; return c;
+    }
+    // PL(bid) = A*bid + K  (BUY closes at bid, SELL closes at ask = bid + spr)
+    function recalc(s, spr) {
+      var A = 0, K = 0, mx = -Infinity, mn = Infinity;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], v = p.lot * cs;
+        if (p.dir === 1) { A += v; K -= p.op * v; } else { A -= v; K += (p.op - spr) * v; }
+        K -= comm * p.lot;
+        if (p.op > mx) mx = p.op; if (p.op < mn) mn = p.op;
+      }
+      s.A = A; s.K = K; s.maxE = mx; s.minE = mn;
+    }
+    function PL(s, p) { return s.pos.length ? s.A * p + s.K : 0; }
+
+    function openPos(s, dir, bid, spr, t) {
+      var n = s.pos.length + 1, lot = lotFor(n);
+      var price = dir === 1 ? bid + spr : bid;
+      s.pos.push({ id: s.nextTid++, dir: dir, lot: lot, op: price, ot: t });
+      if (s.pos.length > 1) s.tpOn = false;
+      if (s.pos.length > s.maxN) s.maxN = s.pos.length;
+      recalc(s, spr);
+    }
+    function closeAll(s, bid, spr, t, reason) {
+      var tot = 0;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], cp = p.dir === 1 ? bid : bid + spr;
+        var pr = p.dir * (cp - p.op) * p.lot * cs - comm * p.lot;
+        tot += pr;
+        s.ev.push({ k: 'T', id: p.id, b: s.bId, dir: p.dir, lot: p.lot, ot: p.ot, op: p.op, ct: t, cp: cp, pr: pr, r: reason });
+      }
+      s.bal += tot;
+      s.ev.push({ k: 'B', id: s.bId, dir: s.firstDir, ot: s.bOpenT, ct: t, n: s.pos.length, pr: tot, r: reason, minPL: s.bMin, peakPL: s.peak, startBal: s.bStartBal });
+      s.pos = []; s.A = 0; s.K = 0; s.tpOn = false;
+    }
+    function stopDay(s, bid, spr, t, reason) {
+      if (s.pos.length) closeAll(s, bid, spr, t, reason);
+      s.dayStopped = true;
+      s.ev.push({ k: 'D', t: t, r: reason, day: s.dayKey });
+    }
+    function trackEq(s, p) {
+      var pl = PL(s, p), eq = s.bal + pl;
+      if (eq < s.eqMin) s.eqMin = eq;
+      if (s.pos.length) { if (pl > s.peak) s.peak = pl; if (pl < s.bMin) s.bMin = pl; }
+    }
+
+    // apply every rule that is already true at price p (closes first, then grid)
+    function checkAt(s, p, spr, t) {
+      for (var guard = 0; guard < 100; guard++) {
+        trackEq(s, p);
+        var n = s.pos.length, pl = PL(s, p), eq = s.bal + pl;
+        if (!s.dayStopped && (n || guard > 0)) {
+          if (dTgt && eq >= s.dayStartEq * (1 + dTgt / 100) - EPS) { stopDay(s, p, spr, t, 'DAY_TARGET'); continue; }
+          if (dLoss && eq <= s.dayStartEq * (1 - dLoss / 100) + EPS) { stopDay(s, p, spr, t, 'DAY_LOSS'); continue; }
+        }
+        if (!n) return;
+        if (tpUsd != null && pl >= tpUsd - EPS) { closeAll(s, p, spr, t, 'BASKET_TP'); continue; }
+        if (slPct != null && pl <= -slPct / 100 * s.bStartBal + EPS) { closeAll(s, p, spr, t, 'BASKET_SL'); continue; }
+        if (trail && s.peak >= trail.start_usd - EPS && pl <= s.peak - trail.drop_usd + EPS) { closeAll(s, p, spr, t, 'TRAIL'); continue; }
+        if (n === 1 && s.tpOn && tp1 != null) {
+          var q = s.pos[0];
+          if ((q.dir === 1 && p >= q.op + tp1 - EPS) || (q.dir === -1 && p + spr <= q.op - tp1 + EPS)) { closeAll(s, p, spr, t, 'TP1'); continue; }
+        }
+        if (n < maxT && !s.dayStopped) {
+          var blockBuy = n === 1 && s.tpOn && tp1 != null && !sameSideWhileTp && s.firstDir === 1;
+          var blockSell = n === 1 && s.tpOn && tp1 != null && !sameSideWhileTp && s.firstDir === -1;
+          if (buyAbove && !blockBuy && p + spr >= s.maxE + step - EPS) { openPos(s, 1, p, spr, t); continue; }
+          if (sellBelow && !blockSell && p <= s.minE - step + EPS) { openPos(s, -1, p, spr, t); continue; }
+        }
+        return;
+      }
+    }
+
+    // move bid from a to b, stopping at every price where a rule can fire
+    function walk(s, a, b, spr, t) {
+      for (var guard = 0; guard < 2000; guard++) {
+        checkAt(s, a, spr, t);
+        if (Math.abs(b - a) < 1e-12) return;
+        var up = b > a, best = b, n = s.pos.length;
+        var cand = function (x) { if (up ? (x > a + 1e-9 && x < best) : (x < a - 1e-9 && x > best)) best = x; };
+        if (n) {
+          if (s.A !== 0) {
+            var plT = function (T) { cand((T - s.K) / s.A); };
+            if (tpUsd != null) plT(tpUsd);
+            if (slPct != null) plT(-slPct / 100 * s.bStartBal);
+            if (trail && s.peak >= trail.start_usd - EPS) plT(s.peak - trail.drop_usd);
+            if (!s.dayStopped && dTgt) plT(s.dayStartEq * (1 + dTgt / 100) - s.bal);
+            if (!s.dayStopped && dLoss) plT(s.dayStartEq * (1 - dLoss / 100) - s.bal);
+            if (trail) plT(trail.start_usd);
+          }
+          if (n === 1 && s.tpOn && tp1 != null) { var q = s.pos[0]; cand(q.dir === 1 ? q.op + tp1 : q.op - tp1 - spr); }
+          if (n < maxT && !s.dayStopped) { cand(s.maxE + step - spr); cand(s.minE - step); }
+        }
+        trackEq(s, best);
+        a = best;
+      }
+    }
+
+    var m15 = 0; // index of first M15 bar not yet closed
+    function signalFor(t) {
+      // last CLOSED bar: start + tfs <= t
+      while (m15 < R.t.length && R.t[m15] + tfs <= t) m15++;
+      var idx = useClosed ? m15 - 1 : Math.min(m15, R.t.length - 1);
+      if (idx < warm) return 0;
+      return STR.trend[idx];
+    }
+    function timeOk(t) {
+      if (!tf) return true;
+      var m = Math.floor((((t - off * 3600 + IST) % 86400) + 86400) % 86400 / 60);
+      var a = tf.from.split(':'), b = tf.to.split(':'), fa = +a[0] * 60 + +a[1], fb = +b[0] * 60 + +b[1];
+      return fa <= fb ? (m >= fa && m <= fb) : (m >= fa || m <= fb);
+    }
+
+    function simBar(s, pts, spr, t, sig, spPts) {
+      s.eqMin = Infinity;
+      checkAt(s, pts[0], spr, t);
+      if (!s.pos.length && !s.dayStopped && sig && (!maxSpPts || spPts <= maxSpPts) && timeOk(t)) {
+        s.bId++; s.bOpenT = t; s.bStartBal = s.bal; s.peak = -Infinity; s.bMin = 0; s.maxN = 0;
+        s.firstDir = sig; s.tpOn = tp1 != null;
+        openPos(s, sig, pts[0], spr, t);
+        checkAt(s, pts[0], spr, t);
+      }
+      for (var k = 1; k < pts.length; k++) walk(s, pts[k - 1], pts[k], spr, t);
+    }
+    function flush(s) {
+      for (var i = 0; i < s.ev.length; i++) {
+        var e = s.ev[i];
+        if (e.k === 'T') trades.push(e); else if (e.k === 'B') { e.maxN = e.n; baskets.push(e); } else dayStops.push(e);
+      }
+      s.ev = [];
+    }
+
+    var dayStartBalForRec = startBal, curDay = null;
+    for (var i = i0; i <= i1; i++) {
+      var t = T[i], spPts = spreadFixed ? (opt.fixedPts != null ? opt.fixedPts : 200) : SP[i];
+      var spr = spreadFixed ? fixedSpr : SP[i] * point;
+      // need positions re-priced with this bar's spread (sell close = bid + spr)
+      if (S.pos.length) recalc(S, spr);
+      var dk = Math.floor((t - off * 3600 + IST - resetSec) / 86400);
+      if (dk !== S.dayKey) {
+        if (curDay) { curDay.endEq = eqClose[i - i0 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+        S.dayKey = dk; S.dayStartEq = S.bal + PL(S, O[i]); S.dayStopped = false;
+        curDay = { key: dk, startEq: S.dayStartEq, startT: t };
+      }
+      var sig = opt.forceSignal || signalFor(t);
+      var bull = C[i] >= O[i];
+      var pOLHC = [O[i], L[i], H[i], C[i]], pOHLC = [O[i], H[i], L[i], C[i]];
+      if (pathMode === 'worst') {
+        var s1 = clone(S), s2 = clone(S);
+        simBar(s1, pOLHC, spr, t, sig, spPts); simBar(s2, pOHLC, spr, t, sig, spPts);
+        var e1 = s1.bal + PL(s1, C[i]), e2 = s2.bal + PL(s2, C[i]);
+        S = (e1 < e2 - 1e-9 || (Math.abs(e1 - e2) <= 1e-9 && s1.eqMin <= s2.eqMin)) ? s1 : s2;
+      } else {
+        var pts = pathMode === 'olhc' ? pOLHC : pathMode === 'ohlc' ? pOHLC : (bull ? pOLHC : pOHLC);
+        simBar(S, pts, spr, t, sig, spPts);
+      }
+      flush(S);
+      var j = i - i0;
+      barT[j] = t; eqClose[j] = S.bal + PL(S, C[i]); eqLow[j] = Math.min(S.eqMin, eqClose[j]);
+      if (opt.onProgress && (j & 16383) === 0) opt.onProgress(j / (i1 - i0 + 1));
+    }
+    if (S.pos.length) { closeAll(S, C[i1], spreadFixed ? fixedSpr : SP[i1] * point, T[i1], 'END'); flush(S); eqClose[i1 - i0] = S.bal; }
+    if (curDay) { curDay.endEq = eqClose[i1 - i0]; curDay.endBal = S.bal; days.push(curDay); }
+
+    return summarize({
+      startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
+      eqClose: eqClose, eqLow: eqLow, barT: barT,
+      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + (opt.fixedPts != null ? opt.fixedPts : 200) + ' pts' : 'CSV', balance: startBal, offset: off },
+      strategyName: st.name, from: T[i0], to: T[i1]
+    });
+  }
+
+  function summarize(r) {
+    var peak = r.startBal, mdd = 0, mddPct = 0;
+    for (var i = 0; i < r.eqClose.length; i++) {
+      var lo = r.eqLow[i], dd = peak - lo;
+      if (dd > mdd) mdd = dd;
+      if (peak > 0 && dd / peak > mddPct) mddPct = dd / peak;
+      if (r.eqClose[i] > peak) peak = r.eqClose[i];
+    }
+    var gp = 0, gl = 0, wins = 0, reasons = {}, max12 = 0;
+    r.baskets.forEach(function (b) {
+      if (b.pr > 0) { gp += b.pr; wins++; } else gl -= b.pr;
+      reasons[b.r] = (reasons[b.r] || 0) + 1;
+    });
+    var dayTarget = 0, dayLoss = 0;
+    r.dayStops.forEach(function (d) { if (d.r === 'DAY_TARGET') dayTarget++; else dayLoss++; });
+    r.net = r.endBal - r.startBal;
+    r.netPct = r.net / r.startBal * 100;
+    r.maxDD = mdd; r.maxDDPct = mddPct * 100;
+    r.pf = gl > 0 ? gp / gl : (gp > 0 ? Infinity : 0);
+    r.winRate = r.baskets.length ? wins / r.baskets.length * 100 : 0;
+    r.reasons = reasons; r.dayTarget = dayTarget; r.dayLoss = dayLoss;
+    r.maxTradesInBasket = r.baskets.reduce(function (m, b) { return Math.max(m, b.n); }, 0);
+    return r;
+  }
+
+  return { run: run, supertrend: supertrend, atr: atr, resample: resample, TF: TF };
+})();
+if (typeof module !== 'undefined') module.exports = SamuEngine;
+</script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.1.0';
+const APP_VERSION = 'v0.2.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -333,7 +686,7 @@ $('nav').addEventListener('click', e => {
   document.querySelectorAll('section.scr').forEach(s => s.classList.toggle('on', s.id === 'scr-' + b.dataset.scr));
   lsSet('samu.tab', b.dataset.scr);
   if (b.dataset.scr === 'data' && S.ds) drawChart();
-  if (b.dataset.scr === 'run') renderRunReady();
+  if (b.dataset.scr === 'run') { renderRunReady(); if (S.lastRun) setTimeout(() => drawEquity(S.lastRun), 0); }
   window.scrollTo(0, 0);
 });
 
@@ -678,6 +1031,7 @@ function renderData() {
     (m.badSamples.length ? '\nSkipped examples:\n  ' + m.badSamples.join('\n  ') : '');
 
   drawChart();
+  try { renderRunReady(); } catch (e) {}
 }
 
 function drawChart() {
@@ -702,7 +1056,7 @@ function drawChart() {
 let rzT; window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(drawChart, 150); });
 
 /* ===================== STRATEGY screen ===================== */
-const BUILTIN_STRATEGY = {"schema":"samu-strategy/1","name":"Step Basket","version":"1.0.0","notes":"Supertrend sirf pehle trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.","symbol":"XAUUSDm","contract_size":100,"point":0.001,"server_gmt_offset_hours":0,"entry":{"type":"supertrend","tf":"M15","atr_period":10,"multiplier":3,"use_closed_bar":true,"role":"first_trade_direction"},"first_trade":{"tp_price":5,"remove_tp_on_second_trade":true},"grid":{"step_price":5,"sell_below_lowest":true,"buy_above_highest":true,"max_trades":12,"after_max":"wait_tp_sl"},"lots":[{"from":1,"to":3,"lot":0.01},{"from":4,"to":6,"lot":0.02},{"from":7,"to":9,"lot":0.03},{"from":10,"to":12,"lot":0.04}],"basket":{"preset":"B","sl_base":"balance_at_basket_start","presets":{"A":{"tp_usd":10,"sl_pct_balance":null,"trail":null},"B":{"tp_usd":null,"sl_pct_balance":1,"trail":{"start_usd":10,"drop_usd":5}},"C":{"tp_usd":10,"sl_pct_balance":1,"trail":null}}},"daily":{"target_pct":1,"loss_pct":5,"base":"day_start_equity","reset_time":"07:00","tz":"IST","on_hit":"close_all_stop_day","open_basket_at_reset":"keep"},"costs":{"commission_per_lot":0,"swap":false},"filters":{"max_spread_points":0,"time":{"enabled":false,"from":"00:00","to":"23:59","tz":"IST"},"news":{"enabled":false,"before_min":30,"after_min":30}}};
+const BUILTIN_STRATEGY = {"schema":"samu-strategy/1","name":"Step Basket","version":"1.0.0","notes":"Supertrend sirf pehle trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.","symbol":"XAUUSDm","contract_size":100,"point":0.001,"server_gmt_offset_hours":0,"entry":{"type":"supertrend","tf":"M15","atr_period":10,"multiplier":3.0,"atr_method":"sma","use_closed_bar":true,"warmup_bars":50,"open_on":"new_m1_bar","role":"first_trade_direction"},"first_trade":{"tp_price":5.0,"remove_tp_on_second_trade":true,"grid_same_side_while_tp":false},"grid":{"step_price":5.0,"sell_below_lowest":true,"buy_above_highest":true,"max_trades":12,"after_max":"wait_tp_sl"},"lots":[{"from":1,"to":3,"lot":0.01},{"from":4,"to":6,"lot":0.02},{"from":7,"to":9,"lot":0.03},{"from":10,"to":12,"lot":0.04}],"basket":{"preset":"B","sl_base":"balance_at_basket_start","presets":{"A":{"tp_usd":10,"sl_pct_balance":null,"trail":null},"B":{"tp_usd":null,"sl_pct_balance":1.0,"trail":{"start_usd":10,"drop_usd":5}},"C":{"tp_usd":10,"sl_pct_balance":1.0,"trail":null}}},"daily":{"target_pct":1.0,"loss_pct":5.0,"base":"day_start_equity","reset_time":"07:00","tz":"IST","on_hit":"close_all_stop_day","open_basket_at_reset":"keep"},"costs":{"commission_per_lot":0,"swap":false},"filters":{"max_spread_points":0,"time":{"enabled":false,"from":"00:00","to":"23:59","tz":"IST"},"news":{"enabled":false,"before_min":30,"after_min":30}}};
 
 function validateStrategy(st) {
   const err = [], warn = [];
@@ -719,6 +1073,7 @@ function validateStrategy(st) {
   need(['supertrend', 'ema', 'sma', 'rsi'].includes(e.type), 'entry.type: supertrend/ema/sma/rsi');
   need(/^(M1|M5|M15|M30|H1|H4|D1)$/.test(e.tf || ''), 'entry.tf galat (M1..D1)');
   if (e.type === 'supertrend') { need(pos(e.atr_period), 'entry.atr_period > 0'); need(pos(e.multiplier), 'entry.multiplier > 0'); }
+  if (e.atr_method != null && !['sma', 'rma'].includes(e.atr_method)) err.push('entry.atr_method: sma (MT5 iATR) ya rma');
   if (e.use_closed_bar === false) warn.push('entry.use_closed_bar = false → live bar signal repaint kar sakta hai');
   const g = st.grid || {};
   need(pos(g.step_price), 'grid.step_price > 0');
@@ -760,9 +1115,9 @@ function summarize(st) {
   const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
   const L = [];
   L.push('Symbol <b>' + esc(st.symbol) + '</b>, contract ' + st.contract_size + ' (0.01 lot pe $1 move = $' + (0.01 * st.contract_size).toFixed(2) + ').');
-  if (e.type === 'supertrend') L.push('Pehla trade <b>Supertrend ' + e.tf + ' (ATR ' + e.atr_period + ', ×' + e.multiplier + ')</b> ki direction mein' + (e.use_closed_bar ? ', closed bar se' : '') + '.');
+  if (e.type === 'supertrend') L.push('Pehla trade <b>Supertrend ' + e.tf + ' (ATR ' + e.atr_period + ', ×' + e.multiplier + ')</b> ki direction mein' + (e.use_closed_bar ? ', closed bar se' : '') + ' · ATR ' + (e.atr_method === 'rma' ? 'RMA (TradingView)' : 'SMA (MT5 iATR)') + '. Nayi basket sirf naye M1 bar ke open pe.');
   if (st.first_trade) L.push('Pehle trade ka TP <b>$' + st.first_trade.tp_price + '</b> price' + (st.first_trade.remove_tp_on_second_trade ? '; doosra trade khulte hi ye TP hat jaata hai.' : '.'));
-  L.push('Grid step <b>$' + g.step_price + '</b>: ' + (g.sell_below_lowest ? 'sabse neeche wale entry se neeche SELL' : '') + (g.sell_below_lowest && g.buy_above_highest ? ', ' : '') + (g.buy_above_highest ? 'sabse upar wale se upar BUY' : '') + '.');
+  L.push('Grid step <b>$' + g.step_price + '</b>: ' + (g.sell_below_lowest ? 'sabse neeche wale entry se neeche SELL' : '') + (g.sell_below_lowest && g.buy_above_highest ? ', ' : '') + (g.buy_above_highest ? 'sabse upar wale se upar BUY' : '') + '. Jab tak pehle trade ka TP laga hai, usi side ka grid trade nahi khulta (TP hi wahan kaam karta hai).');
   L.push('Lot (basket ki ginti se): ' + lotTxt + '. Max <b>' + g.max_trades + '</b> trades' + (g.after_max === 'wait_tp_sl' ? ', uske baad sirf TP/SL ka wait.' : '.'));
   L.push('Basket preset <b>' + esc(b.preset) + '</b>: ' + presetText(p) + (p.sl_pct_balance != null && b.sl_base === 'balance_at_basket_start' ? ' (balance = basket start ka)' : '') + '.');
   L.push('Daily target <b>' + d.target_pct + '%</b>, daily loss <b>' + d.loss_pct + '%</b> (day-start equity). Hit hote hi sab close, din band. Naya din <b>' + d.reset_time + ' ' + d.tz + '</b>' + (d.open_basket_at_reset === 'keep' ? '; reset pe khuli basket chalti rahegi.' : '.'));
@@ -777,6 +1132,7 @@ function setStrategy(st, source, keepText) {
   lsSet('samu.strategy', JSON.stringify(st));
   renderStrategy(keepText);
   if (S.ds) refreshStats();
+  if (typeof renderRunReady === 'function' && $('rPreset')) try { renderRunReady(); } catch (e) {}
 }
 
 function renderStrategy(keepText) {
@@ -832,12 +1188,148 @@ $('btnFormatJson').onclick = () => {
   try { $('stText').value = JSON.stringify(JSON.parse($('stText').value), null, 2); } catch (e) { alert('JSON galat: ' + e.message); }
 };
 
-/* ===================== RUN placeholder ===================== */
-function renderRunReady() {
+/* ===================== RUN ===================== */
+const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case' };
+const REASON_NAME = { TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
+const REASON_SHORT = { TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
+const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
+const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
+const istStr = sec => fmtSec(serverToIst(sec, S.offset));
+
+function isReady() {
   const okD = !!S.ds, okS = !!S.strategy && !validateStrategy(S.strategy).err.length;
-  $('runReady').innerHTML = '<span class="' + (okD ? 'good' : 'badc') + '">' + (okD ? '✓' : '✗') + ' Data</span> &nbsp; ' +
-    '<span class="' + (okS ? 'good' : 'badc') + '">' + (okS ? '✓' : '✗') + ' Strategy</span>';
+  return { okD, okS, ok: okD && okS };
 }
+function renderRunReady() {
+  const r = isReady();
+  $('runReady').innerHTML = '<span class="' + (r.okD ? 'good' : 'badc') + '">' + (r.okD ? '✓' : '✗') + ' Data' + (S.ds ? ' (' + fmtInt(S.ds.t.length) + ' bars)' : '') + '</span> &nbsp; ' +
+    '<span class="' + (r.okS ? 'good' : 'badc') + '">' + (r.okS ? '✓' : '✗') + ' Strategy' + (S.strategy ? ' (' + esc(S.strategy.name) + ')' : '') + '</span>';
+  const sel = $('rPreset'), cur = sel.value || (S.strategy && S.strategy.basket.preset);
+  sel.innerHTML = '';
+  if (S.strategy && S.strategy.basket && S.strategy.basket.presets) Object.keys(S.strategy.basket.presets).forEach(k => {
+    const o = document.createElement('option'); o.value = k; o.textContent = k; sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+  if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+  if (S.ds && !S.ds.s) $('rSpMode').value = 'fixed';
+  $('rSpRow').classList.toggle('hide', $('rSpMode').value !== 'fixed');
+  $('btnRun').disabled = $('btnMatrix').disabled = !r.ok;
+}
+$('rSpMode').onchange = () => { $('rSpRow').classList.toggle('hide', $('rSpMode').value !== 'fixed'); saveRunSettings(); };
+RUN_KEYS.forEach(k => $(k).addEventListener('change', saveRunSettings));
+function saveRunSettings() { const o = {}; RUN_KEYS.forEach(k => o[k] = $(k).value); lsSet('samu.run', JSON.stringify(o)); }
+function loadRunSettings() { try { const o = JSON.parse(lsGet('samu.run') || '{}'); RUN_KEYS.forEach(k => { if (o[k] != null && k !== 'rPreset') $(k).value = o[k]; }); if (o.rPreset) $('rPreset').value = o.rPreset; } catch (e) {} }
+const dateSec = v => { if (!v) return null; const p = v.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]) / 1000; };
+
+function runOpts(over) {
+  return Object.assign({
+    balance: +$('rBal').value || 1000, preset: $('rPreset').value, path: $('rPath').value,
+    spreadMode: (S.ds && !S.ds.s) ? 'fixed' : $('rSpMode').value, fixedPts: +$('rSpPts').value || 0,
+    point: effectivePoint(), offset: S.offset,
+    from: dateSec($('rFrom').value), to: $('rTo').value ? dateSec($('rTo').value) + 86400 : null
+  }, over || {});
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+function runProgress(msg, frac) {
+  $('runProg').classList.toggle('hide', frac == null);
+  if (msg != null) $('runMsg').textContent = msg;
+  if (frac != null) $('runBar').style.width = Math.max(2, frac * 100).toFixed(0) + '%';
+}
+function showRunError(e) { $('runErr').innerHTML = ''; banner($('runErr'), 'bad', '<b>Run fail:</b> ' + esc(e.message || e)); runProgress(null, null); }
+
+$('btnRun').onclick = async () => {
+  if (!isReady().ok) return;
+  $('runErr').innerHTML = ''; const o = runOpts();
+  runProgress('Chal raha hai… ' + o.preset + ' · ' + PATH_NAME[o.path], 0.02); await tick();
+  try {
+    const t0 = performance.now();
+    const r = SamuEngine.run(S.ds, S.strategy, o);
+    r.ms = performance.now() - t0;
+    S.lastRun = r;
+    runProgress(null, null);
+    renderRun(r);
+  } catch (e) { showRunError(e); }
+};
+
+$('btnMatrix').onclick = async () => {
+  if (!isReady().ok) return;
+  $('runErr').innerHTML = '';
+  const presets = Object.keys(S.strategy.basket.presets), paths = ['auto', 'olhc', 'ohlc', 'worst'];
+  const rows = []; let k = 0; const tot = presets.length * paths.length;
+  try {
+    for (const p of presets) for (const path of paths) {
+      runProgress('Matrix ' + (k + 1) + '/' + tot + ': ' + p + ' · ' + PATH_NAME[path], k / tot); await tick();
+      const r = SamuEngine.run(S.ds, S.strategy, runOpts({ preset: p, path }));
+      rows.push({ p, path, r }); k++;
+    }
+  } catch (e) { return showRunError(e); }
+  runProgress(null, null);
+  S.lastMatrix = rows;
+  let h = '<tr><th>PRESET</th><th>PATH</th><th>NET</th><th>MAX DD</th><th>PF</th><th>WIN%</th><th>BASKETS</th></tr>';
+  rows.forEach(x => {
+    const r = x.r, w = x.path === 'worst';
+    h += '<tr' + (w ? ' style="background:#140f04"' : '') + '><td>' + x.p + '</td><td>' + (w ? '<b class="warnc">Worst</b>' : PATH_NAME[x.path]) + '</td><td class="' + (r.net >= 0 ? 'good' : 'badc') + '">' + money(r.net) +
+      '</td><td>' + fmtNum(r.maxDDPct, 1) + '%</td><td>' + (isFinite(r.pf) ? fmtNum(r.pf, 2) : '∞') + '</td><td>' + fmtNum(r.winRate, 0) + '</td><td>' + fmtInt(r.baskets.length) + '</td></tr>';
+  });
+  $('mxTbl').innerHTML = h;
+  $('mxOut').classList.remove('hide');
+  $('mxOut').scrollIntoView({ behavior: 'smooth' });
+};
+
+function renderRun(r) {
+  $('runOut').classList.remove('hide');
+  $('rTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
+  $('rNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + (r.netPct >= 0 ? '+' : '') + fmtNum(r.netPct, 1) + '%)</span>';
+  $('rMeta').textContent = fmtDate(r.from) + ' → ' + fmtDate(r.to) + ' · spread ' + r.opt.spread + ' · ' + Math.round(r.ms || 0) + ' ms';
+  const trades = r.trades.length, wins = r.baskets.filter(b => b.pr > 0).length;
+  const stats = [
+    ['Final balance', money(r.endBal), 'start ' + money(r.startBal)],
+    ['Max DD', fmtNum(r.maxDDPct, 1) + '%', money(r.maxDD) + ' (floating incl.)'],
+    ['Profit factor', isFinite(r.pf) ? fmtNum(r.pf, 2) : '∞', 'basket-wise'],
+    ['Win rate', fmtNum(r.winRate, 1) + '%', wins + ' / ' + r.baskets.length + ' baskets'],
+    ['Trades', fmtInt(trades), 'max ' + r.maxTradesInBasket + ' ek basket mein'],
+    ['Avg basket', money(r.baskets.length ? r.net / r.baskets.length : 0), 'per basket'],
+    ['Target days', fmtInt(r.dayTarget), 'daily +' + S.strategy.daily.target_pct + '% hit'],
+    ['Loss days', fmtInt(r.dayLoss), 'daily −' + S.strategy.daily.loss_pct + '% hit']
+  ];
+  $('rStats').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
+  $('rReasons').innerHTML = Object.entries(r.reasons).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+    const pr = r.baskets.filter(b => b.r === k).reduce((a, b) => a + b.pr, 0);
+    return '<span class="pill">' + (REASON_NAME[k] || k) + ': ' + v + ' · <span class="' + (pr >= 0 ? 'good' : 'badc') + '">' + money(pr) + '</span></span>';
+  }).join('') || '<span class="muted">Koi basket nahi bani.</span>';
+  let h = '<tr><th>#</th><th>OPEN (IST)</th><th>DIR</th><th>TRADES</th><th>WORST</th><th>P/L</th><th>REASON</th></tr>';
+  r.baskets.slice(-30).reverse().forEach(b => {
+    h += '<tr><td>' + b.id + '</td><td>' + istStr(b.ot).slice(5) + '</td><td>' + (b.dir > 0 ? 'BUY' : 'SELL') + '</td><td>' + b.n + '</td><td class="muted">' + money(b.minPL) + '</td><td class="' + (b.pr >= 0 ? 'good' : 'badc') + '">' + money(b.pr) + '</td><td>' + (REASON_SHORT[b.r] || b.r) + '</td></tr>';
+  });
+  $('rBaskets').innerHTML = h;
+  drawEquity(r);
+  $('runOut').scrollIntoView({ behavior: 'smooth' });
+}
+
+function drawEquity(r) {
+  const cv = $('eqChart'); if (!r || !cv.offsetWidth) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.offsetWidth, H = cv.offsetHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const e = r.eqClose, lo = r.eqLow, n = e.length, cols = Math.max(2, Math.floor(W));
+  const ce = new Float64Array(cols).fill(NaN), cl = new Float64Array(cols).fill(Infinity);
+  for (let i = 0; i < n; i++) { const x = Math.floor(i / n * cols); ce[x] = e[i]; if (lo[i] < cl[x]) cl[x] = lo[i]; }
+  let mn = r.startBal, mx = r.startBal;
+  for (let x = 0; x < cols; x++) { if (isFinite(cl[x]) && cl[x] < mn) mn = cl[x]; if (ce[x] > mx) mx = ce[x]; }
+  const pad = 8, y = v => pad + (mx - v) / ((mx - mn) || 1) * (H - 2 * pad);
+  g.strokeStyle = '#1d190d'; g.lineWidth = 1; g.setLineDash([3, 3]);
+  g.beginPath(); g.moveTo(0, y(r.startBal)); g.lineTo(W, y(r.startBal)); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = 'rgba(255,93,93,.35)'; g.beginPath();
+  for (let x = 0; x < cols; x++) if (isFinite(cl[x]) && !isNaN(ce[x])) { g.moveTo(x + .5, y(ce[x])); g.lineTo(x + .5, y(cl[x])); }
+  g.stroke();
+  g.strokeStyle = '#d4af37'; g.lineWidth = 1.6; g.beginPath(); let first = true;
+  for (let x = 0; x < cols; x++) { if (isNaN(ce[x])) continue; if (first) { g.moveTo(x, y(ce[x])); first = false; } else g.lineTo(x, y(ce[x])); }
+  g.stroke();
+  g.fillStyle = '#8f887a'; g.font = '10px ui-monospace,monospace';
+  g.fillText(money(mx), 4, 12); g.fillText(money(mn), 4, H - 3);
+  $('eqAxis').innerHTML = '<span>' + fmtDate(r.from) + '</span><span class="muted">gold = equity · laal = bar ka low</span><span>' + fmtDate(r.to) + '</span>';
+}
+window.addEventListener('resize', () => { if (S.lastRun) setTimeout(() => drawEquity(S.lastRun), 160); });
 
 /* ===================== boot ===================== */
 (async function boot() {
@@ -855,6 +1347,7 @@ function renderRunReady() {
     } else renderData();
   } catch (e) { renderData(); }
 
+  renderRunReady(); loadRunSettings(); renderRunReady();
   const tab = lsGet('samu.tab');
   if (tab) { const b = document.querySelector('#nav button[data-scr="' + tab + '"]'); if (b) b.click(); }
 

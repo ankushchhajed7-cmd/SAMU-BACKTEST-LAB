@@ -14,13 +14,17 @@
     "tf": "M15",
     "atr_period": 10,
     "multiplier": 3.0,
+    "atr_method": "sma",
     "use_closed_bar": true,
+    "warmup_bars": 50,
+    "open_on": "new_m1_bar",
     "role": "first_trade_direction"
   },
 
   "first_trade": {
     "tp_price": 5.0,
-    "remove_tp_on_second_trade": true
+    "remove_tp_on_second_trade": true,
+    "grid_same_side_while_tp": false
   },
 
   "grid": {
