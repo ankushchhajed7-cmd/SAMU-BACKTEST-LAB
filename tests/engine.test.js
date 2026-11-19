@@ -96,4 +96,13 @@ ok('Balance change = sum of trade profits', Math.abs(sum - rw.net) < 1e-6);
   ok('Report: gross profit + gross loss = net', Math.abs(rep.stats.grossProfit + rep.stats.grossLoss - r.net) < 1e-6);
   ok('Report: day dates are IST trading days (07:00 reset)', rep.days[0].date === '2026-07-01', rep.days.map(d => d.date).join(','));
 }
+
+// 12. snapshot for Compare
+{ const n = 3 * 1440; const bars = []; let p = 100;
+  for (let k = 0; k < n; k++) { p += Math.sin(k / 37) * 0.9 + Math.cos(k / 11) * 0.6; bars.push(p); }
+  const r = R(bars, 'B', { balance: 1000, path: 'auto' }); const sn = E.snapshot(r, null, 100);
+  ok('Snapshot: last equity point = final balance', Math.abs(sn.eq[sn.eq.length - 1] - r.endBal) < 1e-9);
+  ok('Snapshot: ≤ 100 points, months sum = net', sn.eq.length <= 100 && Math.abs(sn.months.reduce((a, m) => a + m.pl, 0) - r.net) < 1e-6, sn.eq.length + ' pts');
+  ok('Snapshot: min of eqLow ≤ min equity', Math.min(...sn.eqLow) <= Math.min(...r.eqClose) + 1e-9);
+}
 console.log(fails ? fails + ' FAILED' : 'ALL PASS'); process.exit(fails ? 1 : 0);
