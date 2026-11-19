@@ -1,5 +1,5 @@
 /* SAMU Backtest Lab service worker — offline cache */
-const VERSION = 'v0.4.0';
+const VERSION = 'v0.5.0';
 const CACHE = 'samu-lab-' + VERSION;
 const ASSETS = [
   './',
