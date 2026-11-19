@@ -1,5 +1,5 @@
 /* SAMU Backtest Lab service worker — offline cache */
-const VERSION = 'v0.6.2';
+const VERSION = 'v0.6.3';
 const CACHE = 'samu-lab-' + VERSION;
 const ASSETS = [
   './',
@@ -8,6 +8,7 @@ const ASSETS = [
   './strategies/step-basket.json',
   './strategies/quad-basket.json',
   './strategies/quad-basket-set-b.json',
+  './strategies/quad-basket-set-c.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
