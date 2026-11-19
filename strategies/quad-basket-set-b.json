@@ -1,0 +1,129 @@
+{
+  "schema": "samu-strategy/2",
+  "type": "portfolio",
+  "name": "QUAD Basket Set B",
+  "version": "1.1.0",
+  "notes": "Set B (19 Nov 2026): asli Exness XAUUSDm data (10 Aug\u201319 Nov) pe 264 settings test; pehle 2 mahine pe chuna, aakhri 40 din pe check. Sirf GRID + MARTI: GRID step $8 (tez market $10), har side max 4; MARTI M15 Bollinger, step $6; cycle SL $150. PYRAMID / BREAKOUT off (dono minus, PYRAMID ka result M1 raaste par bahut nirbhar). Faayda chhota hai \u2014 PAPER test ke bina live nahi.",
+  "symbol": "XAUUSDm",
+  "contract_size": 100,
+  "point": 0.001,
+  "server_gmt_offset_hours": 0,
+  "exit": {
+    "cycle_tp_usd": 10,
+    "cycle_sl_usd": 150,
+    "count": "realized_plus_floating",
+    "restart": "next_m1_bar"
+  },
+  "dd": {
+    "freeze_pct": 1.0,
+    "peak_pct": 4.0
+  },
+  "daily": {
+    "target_pct": 1.0,
+    "loss_pct": 2.0,
+    "base": "day_start_equity",
+    "reset_time": "07:00",
+    "tz": "IST",
+    "on_hit": "close_all_stop_day",
+    "open_basket_at_reset": "keep"
+  },
+  "max_total_trades": 20,
+  "modules": {
+    "grid": {
+      "enabled": true,
+      "magic": 7001,
+      "lot": 0.01,
+      "step_price": 8,
+      "step_price_high_atr": 10,
+      "max_per_side": 4,
+      "loss_cap_usd": 50,
+      "lock_close": true
+    },
+    "marti": {
+      "enabled": true,
+      "magic": 7002,
+      "tf": "M15",
+      "bb_period": 20,
+      "bb_dev": 2.0,
+      "trend_tf": "H1",
+      "trend_ema": 50,
+      "step_price": 6,
+      "lots": [
+        0.01,
+        0.02,
+        0.03,
+        0.04
+      ],
+      "loss_cap_usd": 60
+    },
+    "pyramid": {
+      "enabled": false,
+      "magic": 7003,
+      "tf": "M5",
+      "ema": 20,
+      "trend_tf": "M15",
+      "trend_ema": 50,
+      "lot": 0.01,
+      "add_step_price": 3.0,
+      "max_trades": 4,
+      "sl_price": 5.0,
+      "breakeven_on_add": true,
+      "day_loss_cap_usd": 40
+    },
+    "breakout": {
+      "enabled": false,
+      "magic": 7004,
+      "tf": "H1",
+      "lot": 0.02,
+      "sl_price": 5.0,
+      "min_range_price": 1.0,
+      "from": "13:30",
+      "to": "23:30",
+      "tz": "IST",
+      "day_loss_cap_usd": 40
+    }
+  },
+  "basket": {
+    "preset": "ALL",
+    "presets": {
+      "ALL": {
+        "modules": [
+          "grid",
+          "marti"
+        ]
+      },
+      "ONLY_GRID": {
+        "modules": [
+          "grid"
+        ]
+      },
+      "ONLY_MARTI": {
+        "modules": [
+          "marti"
+        ]
+      }
+    }
+  },
+  "costs": {
+    "commission_per_lot": 0,
+    "swap": false
+  },
+  "filters": {
+    "max_spread_points": 0,
+    "atr": {
+      "tf": "H1",
+      "period": 14,
+      "high_price": 15.0
+    },
+    "friday_stop": {
+      "enabled": true,
+      "time": "23:30",
+      "tz": "IST"
+    },
+    "news": {
+      "enabled": false,
+      "before_min": 30,
+      "after_min": 30
+    }
+  }
+}

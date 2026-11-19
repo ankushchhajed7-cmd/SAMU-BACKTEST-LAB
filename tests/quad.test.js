@@ -117,5 +117,12 @@ ok('Random: max open trades ≤ 20', r.maxTradesInBasket >= 1, 'trades/day ' + r
 const rw2 = R(rw, full, { fixedPts: 150, path: 'worst' });
 ok('Random worst-case ≤ auto (approx)', rw2.net <= r.net + 50, rw2.net.toFixed(2) + ' vs ' + r.net.toFixed(2));
 
+// 16. GRID lock: max 1 per side, SELL @103 then BUY @97 → dono side bhar gaye → LOCK close
+r = R([100, 101, 102, 103, 102, 100, 98, 97, 96], S(['grid'], s => { s.modules.grid.max_per_side = 1; s.exit.cycle_tp_usd = 1000; }));
+const lk = r.trades.filter(t => t.r === 'LOCK');
+ok('GRID lock: dono side full → LOCK close + naya grid', lk.length === 4 && lk.every(t => near(t.cp, 97)) && r.trades.length > 4, tl(r).slice(0, 200));
+r = R([100, 101, 102, 103, 102, 100, 98, 97, 96], S(['grid'], s => { s.modules.grid.max_per_side = 1; s.modules.grid.lock_close = false; s.exit.cycle_tp_usd = 1000; }));
+ok('GRID lock_close=false → lock nahi', !r.trades.some(t => t.r === 'LOCK'), '');
+
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');
 process.exit(fails ? 1 : 0);
