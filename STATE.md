@@ -1,11 +1,12 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.5.0** (branch `feature-v0.5.0`), 19 Nov 2026
+**v0.5.1** (branch `feature-v0.5.1`), 19 Nov 2026
 
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.5.1 | 19 Nov 2026 | Header mein ⟳ Refresh button: app cache saaf + latest version + reload (data safe). Refresh ke baad toast ("Update ho gaya: purana → naya"). Offline pe refresh nahi. Service worker ab browser HTTP cache bypass karta hai (`no-cache`) |
 | v0.5.0 | 19 Nov 2026 | Strategy form editor (30 fields, 8 groups): general, Supertrend, pehla trade TP, grid, lot table (row add/delete + auto-fill N/start/badhat), basket preset (TP/SL/trailing on-off, naya preset copy, preset hatao), daily, costs & filters. Har change turant apply + validate + save; Run screen ke presets bhi update |
 | v0.4.0 | 19 Nov 2026 | Compare screen: saved runs list (max 24, duplicate check, select/remove), equity overlay (% return), side-by-side 23 metrics (best green / worst red), mahine-wise P/L per run, warnings (alag range/balance/strategy), Compare HTML export. Report pe "+ Compare", Matrix pe "Sab Compare mein daalo" (Worst-case rows auto-select). Engine `snapshot()` + 3 tests |
 | v0.3.0 | 19 Nov 2026 | Report screen: 18 stats (PF, win rate, expectancy, recovery, avg/largest win-loss, streaks, worst floating, green/red days, best/worst day), equity + drawdown % chart, mahine-wise P/L (+total), din-wise P/L (7 AM IST, month filter, TARGET/LOSS stop), baskets/trades list (50/page). Export: HTML report (self-contained, strategy JSON included), trades CSV, daily CSV. Matrix row tap → uska report. Last run reload ke baad bhi bacha rehta hai. Engine `report()` + 5 tests |
@@ -19,6 +20,7 @@
 | `manifest.json` | PWA install info |
 | `sw.js` | Offline cache (network-first, cache fallback) |
 | `strategies/step-basket.json` | Step Basket strategy (schema `samu-strategy/1`) |
+| `CLAUDE.md` | Kaam ke rules (agle sessions ke liye) |
 | `docs/ENGINE-RULES.md` | Engine ke exact rules (EA parity ke liye) |
 | `tests/engine.test.js` | Engine rule tests (`node tests/engine.test.js`, 24 tests) |
 | `icons/icon-192.png`, `icons/icon-512.png` | App icons |
@@ -29,6 +31,8 @@
 - **(19 Nov 2026 se) Jo version build + test pass ho jaaye, use bina confirmation PR bana ke main mein merge karna.** Test fail ho ya koi decision baaki ho to merge nahi, pehle Ankush ko batana
 - Har push ke saath STATE.md update; files chat mein bhi bhejna
 - Jawab Hinglish, mobile ke liye chhote, end mein date + time (IST)
+- **App standard (19 Nov 2026 se, har nayi app ke liye):** header mein shuru se hi **⟳ Refresh button** (cache saaf + latest version + reload, data safe) aur **version number** dikhna chahiye
+- EA standard: full-screen Gold Luxe dashboard, EA file naam = poora naam + version
 
 ## Settings / conventions
 - Broker: Exness, symbol XAUUSDm, server GMT+0, point 0.001, contract 100 (0.01 lot pe $1 move = $1)

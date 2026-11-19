@@ -101,6 +101,7 @@ section.scr.on{display:block}
 .soon{text-align:center;padding:30px 12px}
 .soon .big{font-size:30px}
 .hide{display:none!important}
+@keyframes spin{to{transform:rotate(360deg)}}
 .fgrp{margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
 .fgrp>.lbl{color:var(--gold2);margin-bottom:2px}
 .field select{width:auto}
@@ -122,11 +123,14 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.5.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.5.1</small></h1>
     </div>
+    <div style="display:flex;align-items:center;gap:10px">
+    <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
     <div class="clocks">
       IST <b id="clkIst">--:--:--</b><br>
       SERVER <b id="clkSrv">--:--:--</b>
+    </div>
     </div>
   </div>
 </header>
@@ -789,7 +793,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.5.0';
+const APP_VERSION = 'v0.5.1';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -2011,6 +2015,23 @@ $('btnCmpExport').onclick = () => {
   download('samu-compare-' + sel.length + 'runs-' + fmtDate(t0) + '_' + fmtDate(t1) + '.html', html, 'text/html');
 };
 
+/* ===================== REFRESH ===================== */
+// Cache saaf karke GitHub se latest version laata hai. Data (IndexedDB / localStorage) safe rehta hai.
+$('btnRefresh').onclick = async () => {
+  if (!navigator.onLine) { toast('Offline ho, refresh ke liye internet chahiye'); return; }
+  const btn = $('btnRefresh'); btn.disabled = true; btn.style.animation = 'spin 0.8s linear infinite';
+  lsSet('samu.refreshFrom', APP_VERSION);
+  try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r => r.update().catch(() => {}))); } catch (e) {}
+  try { const ks = await caches.keys(); await Promise.all(ks.filter(k => k.startsWith('samu-lab-')).map(k => caches.delete(k))); } catch (e) {}
+  location.replace(location.pathname + '?r=' + Date.now());
+};
+function afterRefresh() {
+  const from = lsGet('samu.refreshFrom'); if (!from) return;
+  try { localStorage.removeItem('samu.refreshFrom'); } catch (e) {}
+  toast(from === APP_VERSION ? 'Refresh ho gaya · ' + APP_VERSION + ' (latest)' : 'Update ho gaya: ' + from + ' → ' + APP_VERSION);
+  if (location.search) history.replaceState(null, '', location.pathname);
+}
+
 /* ===================== boot ===================== */
 (async function boot() {
   S.offset = +(lsGet('samu.offset') || 0); $('offIn').value = S.offset; tickClock();
@@ -2031,6 +2052,7 @@ $('btnCmpExport').onclick = () => {
   try { const cm = await DB.get('cmp'); if (Array.isArray(cm)) S.cmp = cm; } catch (e) {}
   renderCompare();
   try { const lr = await DB.get('lastRun'); if (lr && lr.eqClose) setReport(lr, false); } catch (e) {}
+  afterRefresh();
   const tab = lsGet('samu.tab');
   if (tab) { const b = document.querySelector('#nav button[data-scr="' + tab + '"]'); if (b) b.click(); }
 
