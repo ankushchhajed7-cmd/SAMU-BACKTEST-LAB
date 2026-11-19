@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.2** (branch `feature-v0.6.2`), 19 Nov 2026 — GRID lock rule + QUAD Set B
+**v0.6.3** (branch `feature-v0.6.3`), 19 Nov 2026 — QUAD Set C (Ankush ki Sheet settings)
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.3 | 19 Nov 2026 | `strategies/quad-basket-set-c.json` + **QUAD Set C** button. Settings Ankush ne Sheet "QUAD Set B — Settings + aapke badlav" (claude.ai artifact) ke peele column mein bhari |
 | v0.6.2 | 19 Nov 2026 | **GRID lock** (`modules.grid.lock_close`, default on): dono side max level bhar jaayein to GRID close (`LOCK`) — pehle hedge mein phans kar mahino atka rehta tha (Set B ka pehla +5% isi bug ki wajah se nakli tha). Naya **`strategies/quad-basket-set-b.json`** + Strategy screen pe **QUAD Set B** button. Form mein "Lock pe close". 2 naye tests |
 | v0.6.1 | 19 Nov 2026 | DATA screen pe **⬇ GitHub se Data**: INVESTOR-ID repo ke `data/m1/<SYMBOL>_M1.json` + `.csv.gz` (raw.githubusercontent, gzip → DecompressionStream) → wahi CSV loader; server GMT offset meta se apne aap. Data INVESTOR-ID v1.13 ka **Scan → 📥 M1 Data lao** banata hai (GitHub Actions + MT5 investor login). Symbol yaad rehta hai |
 | v0.6.0 | 19 Nov 2026 | **QUAD Basket** (`strategies/quad-basket.json`, schema `samu-strategy/2` portfolio): 4 EA — GRID (BUY+SELL, $3 levels), MARTI (H1 EMA trend + M5 Bollinger, 0.01→0.04), PYRAMID (M15 EMA trend + M5 EMA20, profit pe add, SL breakeven), BREAKOUT (H1 high/low stop orders 13:30–23:30 IST). Common exit: cycle ka band + khula P/L = +$10. DD: EA-wise caps, cycle SL $150, freeze −1%, hard stop −2%, peak −4%, max 20 trades, ATR/Friday filters. Presets = EA on/off (ALL, NO_GRID…). Run/Report pe **EA-wise P/L** table + Trades/din; Trades CSV mein `ea` column; Compare mein Trades/din. Strategy screen: **QUAD Basket (4 EA)** button + QUAD form. Rules: `docs/QUAD-RULES.md`. Tests: `tests/quad.test.js` (25) |
@@ -98,6 +99,7 @@
 - [x] **Set B** (`quad-basket-set-b.json`): GRID + MARTI; GRID step $8 (tez $10), max 4/side, lock close; MARTI M15 BB(20,2), step $6; cycle SL $150. Poore 101 din: **+$269 (+2.7%)**, max DD 4.8%, PF 1.12, 16 trades/din, Worst-case +$259; mahine +257 / −45 / +274 / −215. Akele GRID −0.5%, akela MARTI −7.2%. Spread 300 pts pe −$100, 400 pe −$570 → bahut patla faayda
 - [ ] Set B: live EA se pehle **PAPER forward test** (2–4 hafte) + 6 mahine ka data (MT5 maxbars 100k pe ruka — 2 runs ya M1 export ko 2 hisson mein)
 - QUAD (original, lock fix ke baad): −$1,669 (−16.7%) Auto
+- [x] **Set C** (Ankush, Sheet se): chaaro EA ON, cycle SL $500, max 25 trades, freeze 5%, hard stop 10%, peak 8%, caps $100, GRID step $6/$8 max 6 lock OFF, MARTI trend H4, PYRAMID SL $10 add $4, BREAKOUT lot 0.01 SL $10, Friday stop 14:30 (Sheet mein time aisa padha gaya). Result: Auto **+$15 (0.1%)**, DD 8.9% ($943), 40 trades/din; **Worst-case −$1,986 (−19.9%), DD 22%**. Worst din −$300, ek cycle −$500 tak. NO_BREAKOUT Auto +4.4% lekin Worst −21%, O→H→L→C −9.4%. PYRAMID ka result raaste par bahut nirbhar (Auto −57, Worst −1,768) → M1 backtest pe bharosa nahi
 - [ ] Achha result → 4 live EA (GRID/MARTI/PYRAMID/BREAKOUT) + SAMU QUAD TESTER, naya repo SAMU-QUAD-BASKET
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
 - [x] `feature-ea-v1.03` main mein merge (19 Nov, Ankush ke kehne par; v1.02 bhi isi mein)

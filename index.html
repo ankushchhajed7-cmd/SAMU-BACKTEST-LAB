@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.6.2</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.6.3</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -223,6 +223,7 @@ section.scr.on{display:block}
       <button class="btn small" id="btnBuiltIn">Step Basket (built-in)</button>
       <button class="btn small" id="btnQuad">QUAD Basket (4 EA)</button>
       <button class="btn small" id="btnQuadB">QUAD Set B</button>
+      <button class="btn small" id="btnQuadC">QUAD Set C</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -1230,7 +1231,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.6.2';
+const APP_VERSION = 'v0.6.3';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1902,6 +1903,7 @@ async function loadBuiltIn() {
 $('btnBuiltIn').onclick = loadBuiltIn;
 $('btnQuad').onclick = () => loadQuad('quad-basket.json');
 $('btnQuadB').onclick = () => loadQuad('quad-basket-set-b.json');
+$('btnQuadC').onclick = () => loadQuad('quad-basket-set-c.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
