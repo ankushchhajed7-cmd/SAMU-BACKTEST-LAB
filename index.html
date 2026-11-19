@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.6.1</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.6.2</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -222,6 +222,7 @@ section.scr.on{display:block}
     <div class="btns">
       <button class="btn small" id="btnBuiltIn">Step Basket (built-in)</button>
       <button class="btn small" id="btnQuad">QUAD Basket (4 EA)</button>
+      <button class="btn small" id="btnQuadB">QUAD Set B</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -895,6 +896,12 @@ var SamuEngine = (function () {
           }
         });
         if (capped) continue;
+        // GRID lock: dono side max levels bhar gaye → hedge mein phansa (P/L hilta nahi) → GRID close, naya grid
+        var gl = s.md.grid;
+        if (on.grid && G.lock_close !== false && gl.anchor != null && gl.up >= G.max_per_side && gl.dn >= G.max_per_side && cnt(s, 'grid')) {
+          closeWhere(s, function (q) { return q.m === 'grid'; }, p, spr, t, 'LOCK');
+          resetMod(s, 'grid'); continue;
+        }
         // SL (PYRAMID / BREAKOUT)
         var hit = false;
         for (var i = 0; i < s.pos.length; i++) if (slHit(s.pos[i], p, spr)) { hit = true; break; }
@@ -1223,7 +1230,7 @@ if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.6.1';
+const APP_VERSION = 'v0.6.2';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -1798,7 +1805,7 @@ const QUAD_FORM_GROUPS = [
   ['General', [['name', 'text', 'Naam'], ['symbol', 'text', 'Symbol'], ['contract_size', 'num', 'Contract size'], ['point', 'num', 'Point'], ['server_gmt_offset_hours', 'num', 'Server GMT offset']]],
   ['Common exit', [['exit.cycle_tp_usd', 'num', 'Cycle TP ($)', 'Band + khula P/L'], ['exit.cycle_sl_usd', 'numN', 'Cycle SL ($)', 'Khaali = off'], ['max_total_trades', 'num', 'Max trades ek saath']]],
   ['DD control', [['dd.freeze_pct', 'num', 'Freeze %', 'GRID/MARTI naye level band'], ['daily.loss_pct', 'num', 'Hard stop %', 'Sab close, din band'], ['dd.peak_pct', 'num', 'Peak protection %', '0 = off'], ['daily.target_pct', 'num', 'Daily target %', '0 = off'], ['daily.reset_time', 'time', 'Reset time (IST)']]],
-  ['EA-1 GRID', [['modules.grid.enabled', 'bool', 'Chalu'], ['modules.grid.lot', 'num', 'Lot'], ['modules.grid.step_price', 'num', 'Step ($)'], ['modules.grid.step_price_high_atr', 'num', 'Step tez market ($)'], ['modules.grid.max_per_side', 'num', 'Max har side'], ['modules.grid.loss_cap_usd', 'numN', 'Loss cap ($)']]],
+  ['EA-1 GRID', [['modules.grid.enabled', 'bool', 'Chalu'], ['modules.grid.lot', 'num', 'Lot'], ['modules.grid.step_price', 'num', 'Step ($)'], ['modules.grid.step_price_high_atr', 'num', 'Step tez market ($)'], ['modules.grid.max_per_side', 'num', 'Max har side'], ['modules.grid.lock_close', 'bool', 'Lock pe close', 'Dono side bhar jaayein to GRID band'], ['modules.grid.loss_cap_usd', 'numN', 'Loss cap ($)']]],
   ['EA-2 MARTI', [['modules.marti.enabled', 'bool', 'Chalu'], ['modules.marti.lots', 'arr', 'Lots', 'Comma se: 0.01, 0.02 …'], ['modules.marti.step_price', 'num', 'Step ($)'], ['modules.marti.tf', 'sel', 'BB timeframe', '', QTF], ['modules.marti.bb_period', 'num', 'BB period'], ['modules.marti.bb_dev', 'num', 'BB deviation'], ['modules.marti.trend_tf', 'sel', 'Trend timeframe', '', QTF], ['modules.marti.trend_ema', 'num', 'Trend EMA'], ['modules.marti.loss_cap_usd', 'numN', 'Loss cap ($)']]],
   ['EA-3 PYRAMID', [['modules.pyramid.enabled', 'bool', 'Chalu'], ['modules.pyramid.lot', 'num', 'Lot'], ['modules.pyramid.sl_price', 'num', 'SL ($)'], ['modules.pyramid.add_step_price', 'num', 'Add step ($)'], ['modules.pyramid.max_trades', 'num', 'Max trades'], ['modules.pyramid.breakeven_on_add', 'bool', 'Add pe SL breakeven'], ['modules.pyramid.tf', 'sel', 'Entry timeframe', '', QTF], ['modules.pyramid.ema', 'num', 'Entry EMA'], ['modules.pyramid.trend_tf', 'sel', 'Trend timeframe', '', QTF], ['modules.pyramid.trend_ema', 'num', 'Trend EMA'], ['modules.pyramid.day_loss_cap_usd', 'numN', 'Din ka loss cap ($)']]],
   ['EA-4 BREAKOUT', [['modules.breakout.enabled', 'bool', 'Chalu'], ['modules.breakout.lot', 'num', 'Lot'], ['modules.breakout.sl_price', 'num', 'SL ($)'], ['modules.breakout.tf', 'sel', 'Range timeframe', '', QTF], ['modules.breakout.min_range_price', 'num', 'Min range ($)'], ['modules.breakout.from', 'time', 'From (IST)'], ['modules.breakout.to', 'time', 'To (IST)'], ['modules.breakout.day_loss_cap_usd', 'numN', 'Din ka loss cap ($)']]],
@@ -1814,12 +1821,14 @@ function modTable(r) {
   });
   return h;
 }
-async function loadQuad() {
+async function loadQuad(file) {
+  file = typeof file === 'string' ? file : 'quad-basket.json';
   try {
-    const r = await fetch('strategies/quad-basket.json', { cache: 'no-cache' });
+    const r = await fetch('strategies/' + file, { cache: 'no-cache' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    setStrategy(await r.json(), 'strategies/quad-basket.json');
-    toast('QUAD Basket load ho gaya');
+    const st = await r.json();
+    setStrategy(st, 'strategies/' + file);
+    toast(st.name + ' load ho gaya');
   } catch (e) { banner($('stBanners'), 'bad', 'QUAD strategy load nahi hui: ' + esc(e.message)); }
 }
 
@@ -1891,7 +1900,8 @@ async function loadBuiltIn() {
 }
 
 $('btnBuiltIn').onclick = loadBuiltIn;
-$('btnQuad').onclick = loadQuad;
+$('btnQuad').onclick = () => loadQuad('quad-basket.json');
+$('btnQuadB').onclick = () => loadQuad('quad-basket-set-b.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -2038,8 +2048,8 @@ $('stForm').addEventListener('click', e => {
 
 /* ===================== RUN ===================== */
 const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case' };
-const REASON_NAME = { CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
-const REASON_SHORT = { CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
+const REASON_NAME = { LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
+const REASON_SHORT = { LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
 const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
 const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
 const istStr = sec => fmtSec(serverToIst(sec, S.offset));

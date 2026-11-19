@@ -1,7 +1,7 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.6.1** (branch `feature-v0.6.1`), 19 Nov 2026 — GitHub se M1 data
+**v0.6.2** (branch `feature-v0.6.2`), 19 Nov 2026 — GRID lock rule + QUAD Set B
 
 ## EA
 **SAMU Universal EA v1.03** (branch `feature-ea-v1.03`) — code ready, **VPS Helper se VPS pe bheja** (samusignal `vps-ea/`, helper compile karega; result SamuSignal app → COPY tab → VPS Helper). JSON file na mile to EA **built-in Step Basket** settings se chalta hai. Setup: `docs/EA-SETUP.md`
@@ -9,6 +9,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.6.2 | 19 Nov 2026 | **GRID lock** (`modules.grid.lock_close`, default on): dono side max level bhar jaayein to GRID close (`LOCK`) — pehle hedge mein phans kar mahino atka rehta tha (Set B ka pehla +5% isi bug ki wajah se nakli tha). Naya **`strategies/quad-basket-set-b.json`** + Strategy screen pe **QUAD Set B** button. Form mein "Lock pe close". 2 naye tests |
 | v0.6.1 | 19 Nov 2026 | DATA screen pe **⬇ GitHub se Data**: INVESTOR-ID repo ke `data/m1/<SYMBOL>_M1.json` + `.csv.gz` (raw.githubusercontent, gzip → DecompressionStream) → wahi CSV loader; server GMT offset meta se apne aap. Data INVESTOR-ID v1.13 ka **Scan → 📥 M1 Data lao** banata hai (GitHub Actions + MT5 investor login). Symbol yaad rehta hai |
 | v0.6.0 | 19 Nov 2026 | **QUAD Basket** (`strategies/quad-basket.json`, schema `samu-strategy/2` portfolio): 4 EA — GRID (BUY+SELL, $3 levels), MARTI (H1 EMA trend + M5 Bollinger, 0.01→0.04), PYRAMID (M15 EMA trend + M5 EMA20, profit pe add, SL breakeven), BREAKOUT (H1 high/low stop orders 13:30–23:30 IST). Common exit: cycle ka band + khula P/L = +$10. DD: EA-wise caps, cycle SL $150, freeze −1%, hard stop −2%, peak −4%, max 20 trades, ATR/Friday filters. Presets = EA on/off (ALL, NO_GRID…). Run/Report pe **EA-wise P/L** table + Trades/din; Trades CSV mein `ea` column; Compare mein Trades/din. Strategy screen: **QUAD Basket (4 EA)** button + QUAD form. Rules: `docs/QUAD-RULES.md`. Tests: `tests/quad.test.js` (25) |
 | EA v1.03 | 19 Nov 2026 | **PAPER mode (default)**: `InpLiveTrading = false` → virtual positions (bid/ask se P/L, OrderCalcProfit), broker ko koi order nahi; restart-safe (GV); paper trades CSV `SAMU_UEA_paper_*.csv`; dashboard PAPER P/L + banner; purani asli trade (same magic) ho to warning. Tester mein hamesha normal orders. Ankush: is account pe sirf testing, koi asli trade nahi chahiye |
@@ -93,7 +94,10 @@
   - Har EA minus (Auto): GRID −667, BREAKOUT −370, MARTI −306, PYRAMID −218. Koi preset (NO_GRID/NO_MARTI/NO_PYRAMID/NO_BREAKOUT) plus mein nahi; sabse kam bura NO_BREAKOUT Auto −6.8% (Worst −28.5%)
   - Spread 0 pe bhi −$887 (−8.9%) → spread se zyada, design mein hi edge nahi. Chhota +$10 TP vs bade loss (cap $50–60, cycle SL $150) ka asantulan
   - Daily −2% hard stop din ka loss rokta hai (worst din −$170), lekin lagatar laal din jud ke DD 17% — "max DD 2%" sirf ek din ka hai, poore period ka nahi
-- [ ] **Faisla baaki (Ankush):** live EA abhi NAHI banane. Redesign ya idea chhodna — options chat mein
+- [x] Ankush: "doosri set file banao" → 2 sweep (258 + 264 settings), pehle 2 mahine (10 Aug–10 Oct) pe chuna, aakhri 40 din (10 Oct–19 Nov) pe check. Sirf ~11% settings in-sample plus; top 12 mein se sirf 2 out-of-sample plus → zyada tar settings ka plus sirf kismat (overfit)
+- [x] **Set B** (`quad-basket-set-b.json`): GRID + MARTI; GRID step $8 (tez $10), max 4/side, lock close; MARTI M15 BB(20,2), step $6; cycle SL $150. Poore 101 din: **+$269 (+2.7%)**, max DD 4.8%, PF 1.12, 16 trades/din, Worst-case +$259; mahine +257 / −45 / +274 / −215. Akele GRID −0.5%, akela MARTI −7.2%. Spread 300 pts pe −$100, 400 pe −$570 → bahut patla faayda
+- [ ] Set B: live EA se pehle **PAPER forward test** (2–4 hafte) + 6 mahine ka data (MT5 maxbars 100k pe ruka — 2 runs ya M1 export ko 2 hisson mein)
+- QUAD (original, lock fix ke baad): −$1,669 (−16.7%) Auto
 - [ ] Achha result → 4 live EA (GRID/MARTI/PYRAMID/BREAKOUT) + SAMU QUAD TESTER, naya repo SAMU-QUAD-BASKET
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
 - [x] `feature-ea-v1.03` main mein merge (19 Nov, Ankush ke kehne par; v1.02 bhi isi mein)

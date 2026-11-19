@@ -14,6 +14,7 @@ Signal wali entries sirf **naye M1 bar ke open** pe.
 2. Step = `step_price`; agar ATR filter "tez market" bole to `step_price_high_atr`. Step grid shuru hote waqt fix hota hai.
 3. Bid ≥ anchor + step × (k+1) → naya **SELL** (upar wala level). Bid ≤ anchor − step × (k+1) → naya **BUY**. Har side max `max_per_side`, har level ek baar.
 4. GRID ka khula P/L ≤ −`loss_cap_usd` → saare GRID trades close (`CAP`), GRID us din band.
+5. **Lock** (v0.6.2, `lock_close`, default on): dono side `max_per_side` bhar gaye → GRID hedge mein phans jaata hai (P/L hilta nahi, cycle din/hafton atka rehta) → saare GRID trades close (`LOCK`), agle M1 bar se naya grid.
 
 ### EA-2 MARTI (`modules.marti`)
 1. Trend = `trend_tf` ka band close vs EMA(`trend_ema`): upar = uptrend, neeche = downtrend.
@@ -42,7 +43,7 @@ Signal wali entries sirf **naye M1 bar ke open** pe.
 - Cycle tab shuru hota hai jab us cycle ka pehla trade khulta hai.
 
 ## DD control (account equity, day-start equity base)
-Check ka order har price pe: daily target → hard stop → peak → freeze → cycle TP → cycle SL → EA caps → SL → pending → GRID / MARTI / PYRAMID levels.
+Check ka order har price pe: daily target → hard stop → peak → freeze → cycle TP → cycle SL → EA caps → GRID lock → SL → pending → GRID / MARTI / PYRAMID levels.
 - **Daily target**: equity ≥ day start × (1 + `daily.target_pct`%) → sab close, din band.
 - **Hard stop**: equity ≤ day start × (1 − `daily.loss_pct`%) → sab close, din band.
 - **Peak protection**: equity ≤ highest equity × (1 − `dd.peak_pct`%) → sab close. Live EA mein PAUSE (haath se RESUME); backtest mein us din band, peak = tab ka balance.
