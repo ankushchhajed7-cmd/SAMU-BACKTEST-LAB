@@ -1,12 +1,12 @@
-# SAMU Universal EA v1.03 — VPS setup
+# SAMU Universal EA v1.04 — VPS setup
 
 ## 0. VPS Helper (automatic)
 EA ki file `samusignal` repo ke `vps-ea/` folder mein, main branch pe hai. **SamuSignal VPS Helper** 2 min mein use VPS ke har MT5 terminal ke `MQL5\Experts` mein daal ke compile kar deta hai. Compile ka result: SamuSignal app → **COPY tab → VPS Helper**.
-Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **built-in Step Basket** settings se chalta hai (dashboard banner batata hai). Apni settings chahiye to neeche step 1.3 se JSON daalo.
+Helper v1.06 se `samusignal` repo ke `vps-files/` folder ki `.json` bhi har terminal ke `MQL5\Files\` mein jaati hai (`vps-files/step-basket.json` = **Step Basket $10 FINAL**). JSON na ho to EA **built-in Step Basket** settings se chalta hai (dashboard banner batata hai).
 
 ## 1. Files copy karo (haath se, agar helper nahi)
 1. MT5 → **File → Open Data Folder**
-2. `MQL5\Experts\` mein daalo: **`SAMU Universal EA v1.03.mq5`** (repo ka `ea/` folder)
+2. `MQL5\Experts\` mein daalo: **`SAMU Universal EA v1.04.mq5`** (repo ka `ea/` folder)
 3. `MQL5\Files\` mein daalo: **`step-basket.json`** (repo ka `strategies/` folder)
    - App ke Strategy screen se **JSON download** karke bhi daal sakte ho (form mein badli settings ke saath)
 
@@ -16,7 +16,7 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
 
 ## 3. Chart pe lagao
 1. **XAUUSDm M1** chart kholo (EA ka timeframe M1 hi rakho; Supertrend apne aap M15 se padhta hai)
-2. Navigator → Expert Advisors → **SAMU Universal EA v1.03** → chart pe drag
+2. Navigator → Expert Advisors → **SAMU Universal EA v1.04** → chart pe drag
 3. Inputs:
    | Input | Default | Matlab |
    |---|---|---|
@@ -33,9 +33,16 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
    | InpAllocBalance | 1000 | Own mode: daily % aur basket SL % ka base ($) — dashboard pe P/L sirf is EA ka |
    | InpAllocFrom | 0 | Own mode: realized P/L kab se gine (0 = pehli baar chalne se) |
    | InpMinMarginLevel | 300 | Margin level is % se neeche ho to nayi trade nahi (0 = off) |
+   | InpNewsCurrencies | USD | News filter ki currency (JSON mein `filters.news.enabled` = true ho tab) |
 4. **Algo Trading** button ON
 
-## 3a. PAPER mode (default, v1.03)
+## 3c. Friday stop + news (v1.04)
+- `filters.friday_stop` (enabled, time IST): Friday us time ke baad, Saturday, Sunday **nayi basket nahi**. Khuli basket TP/SL se chalti rehti hai. App backtest jaisa.
+- `filters.news` (enabled, before_min, after_min): MT5 Economic Calendar ki **High** news (InpNewsCurrencies) se pehle/baad nayi basket nahi. Sirf live/paper chart pe — Strategy Tester aur app backtest mein news nahi.
+- Dashboard: banner "FRIDAY STOP" / "NEWS …", info line mein `News` aur `Fri`.
+- Step Basket $10 FINAL ($10,000 wala backtest) se milana ho to **InpAllocBalance = 10000**.
+
+## 3a. PAPER mode (default, v1.04)
 - `InpLiveTrading = false` → EA live chart pe poore rules se chalta hai lekin trades **virtual** hain: broker ko koi order nahi, account ka balance / margin nahi badalta.
 - Dashboard: **PAPER P/L**, banner "PAPER …". Paper trades ka log: `MQL5\Files\SAMU_UEA_paper_<symbol>_<magic>.csv` (app ke Trades CSV jaise columns).
 - Paper P/L = bid/ask spread ke saath, slippage nahi.
@@ -63,7 +70,7 @@ Helper JSON copy nahi karta — `MQL5\Files\step-basket.json` na ho to EA **buil
 - Config galat ho to banner pe laal **CONFIG ERROR** + wajah (EA trade nahi karega)
 
 ## 5. Strategy Tester (app se milane ke liye)
-- Expert: SAMU Universal EA v1.03 · Symbol XAUUSDm · Period **M1**
+- Expert: SAMU Universal EA v1.04 · Symbol XAUUSDm · Period **M1**
 - Model: **"1 minute OHLC"** = app ke **Auto (MT5)** path jaisa · **"Every tick based on real ticks"** = sabse asli
 - `step-basket.json` tester apne aap copy karta hai (`#property tester_file`). Doosra naam use karo to `MQL5\Files` mein hona chahiye aur tester ke liye naam `step-basket.json` hi rakho
 - Deposit = app ka starting balance (jaise 1000)

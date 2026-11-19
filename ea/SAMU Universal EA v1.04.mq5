@@ -1,11 +1,14 @@
 //+------------------------------------------------------------------+
-//|                                    SAMU Universal EA v1.03.mq5   |
+//|                                    SAMU Universal EA v1.04.mq5   |
 //|  Reads a SAMU strategy JSON (schema samu-strategy/1) and trades  |
 //|  it with the same rules as SAMU Backtest Lab                     |
 //|  (docs/ENGINE-RULES.md). Gold Luxe full-screen dashboard.        |
+//|  v1.04 (19-Nov-2026): Friday stop (filters.friday_stop, IST) +   |
+//|  news filter (filters.news, MT5 calendar, USD High, live only).  |
+//|  Dono sirf NAYI basket rokte hain; khuli basket TP/SL se chalti. |
 //+------------------------------------------------------------------+
 #property copyright   "SAMU"
-#property version     "1.03"
+#property version     "1.04"
 #property description "SAMU Universal EA: JSON strategy (MQL5\\Files), Supertrend first trade, step grid basket, lot table, basket TP/SL/trailing, daily target/loss, 07:00 IST reset."
 #property tester_file "step-basket.json"
 
@@ -26,9 +29,10 @@ input bool   InpOwnMode        = true;               // Own P/L mode: daily % + 
 input double InpAllocBalance   = 1000;               // Own mode: daily % / basket SL % ka base ($)
 input datetime InpAllocFrom    = 0;                  // Own mode: realized P/L kab se gine (0 = pehli baar chalne se)
 input double InpMinMarginLevel = 300;                // Nayi trade tabhi jab margin level >= ye % (0 = off)
+input string InpNewsCurrencies = "USD";              // News filter: currency (comma se: USD,EUR)
 
 #define EA_NAME    "SAMU Universal EA"
-#define EA_VERSION "v1.03"
+#define EA_VERSION "v1.04"
 #define PFX        "SAMUUEA_"
 #define IST_SEC    19800
 
@@ -249,6 +253,12 @@ double  g_cs, g_point, g_off;
 ENUM_TIMEFRAMES g_tfEnum;
 int     g_atrP, g_warm, g_maxT, g_resetSec, g_maxSpread, g_tFrom, g_tTo;
 double  g_mult, g_tp1, g_step, g_tpUsd, g_slPct, g_trStart, g_trDrop, g_dTgt, g_dLoss, g_comm;
+bool    g_friOn, g_newsOn, g_newsBlock;
+int     g_friMin, g_newsBefore, g_newsAfter;
+datetime g_newsT[];
+string  g_newsN[];
+datetime g_newsLoaded = 0;
+string  g_newsTxt = "";
 bool    g_atrRma, g_closedBar, g_tp1On, g_sameSide, g_buyAbove, g_sellBelow, g_tpOn, g_slOn, g_trailOn, g_timeOn;
 int     g_lotFrom[], g_lotTo[];
 double  g_lotVal[];
@@ -272,21 +282,21 @@ int HhmmToMin(const string s)
 string BuiltinStrategy()
   {
    string s = "";
-   s += "{\"schema\":\"samu-strategy/1\",\"name\":\"Step Basket\",\"version\":\"1.0.0\",\"notes\":\"Supertrend sirf peh";
-   s += "le trade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.\",\"symbol\":\"XAUUSDm\",\"cont";
-   s += "ract_size\":100,\"point\":0.001,\"server_gmt_offset_hours\":0,\"entry\":{\"type\":\"supertrend\",\"tf\":\"M15";
-   s += "\",\"atr_period\":10,\"multiplier\":3.0,\"atr_method\":\"sma\",\"use_closed_bar\":true,\"warmup_bars\":50,\"ope";
-   s += "n_on\":\"new_m1_bar\",\"role\":\"first_trade_direction\"},\"first_trade\":{\"tp_price\":5.0,\"remove_tp_on_sec";
-   s += "ond_trade\":true,\"grid_same_side_while_tp\":false},\"grid\":{\"step_price\":5.0,\"sell_below_lowest\":true,\"";
-   s += "buy_above_highest\":true,\"max_trades\":12,\"after_max\":\"wait_tp_sl\"},\"lots\":[{\"from\":1,\"to\":3,\"lot";
-   s += "\":0.01},{\"from\":4,\"to\":6,\"lot\":0.02},{\"from\":7,\"to\":9,\"lot\":0.03},{\"from\":10,\"to\":12,\"lot\":0";
-   s += ".04}],\"basket\":{\"preset\":\"B\",\"sl_base\":\"balance_at_basket_start\",\"presets\":{\"A\":{\"tp_usd\":10,";
-   s += "\"sl_pct_balance\":null,\"trail\":null},\"B\":{\"tp_usd\":null,\"sl_pct_balance\":1.0,\"trail\":{\"start_usd\":";
-   s += "10,\"drop_usd\":5}},\"C\":{\"tp_usd\":10,\"sl_pct_balance\":1.0,\"trail\":null}}},\"daily\":{\"target_pct\":1.";
-   s += "0,\"loss_pct\":5.0,\"base\":\"day_start_equity\",\"reset_time\":\"07:00\",\"tz\":\"IST\",\"on_hit\":\"close_al";
-   s += "l_stop_day\",\"open_basket_at_reset\":\"keep\"},\"costs\":{\"commission_per_lot\":0,\"swap\":false},\"filters";
-   s += "\":{\"max_spread_points\":0,\"time\":{\"enabled\":false,\"from\":\"00:00\",\"to\":\"23:59\",\"tz\":\"IST\"},\"n";
-   s += "ews\":{\"enabled\":false,\"before_min\":30,\"after_min\":30}}}";
+   s += "{\"schema\":\"samu-strategy/1\",\"name\":\"Step Basket\",\"version\":\"1.0.0\",\"notes\":\"Supertrend sirf pehle tr";
+   s += "ade ki direction. Uske baad $5 step grid dono taraf. Basket preset A/B/C.\",\"symbol\":\"XAUUSDm\",\"contr";
+   s += "act_size\":100,\"point\":0.001,\"server_gmt_offset_hours\":0,\"entry\":{\"type\":\"supertrend\",\"tf\":\"M15\",\"atr";
+   s += "_period\":10,\"multiplier\":3,\"atr_method\":\"sma\",\"use_closed_bar\":true,\"warmup_bars\":50,\"open_on\":\"new_";
+   s += "m1_bar\",\"role\":\"first_trade_direction\"},\"first_trade\":{\"tp_price\":5,\"remove_tp_on_second_trade\":true";
+   s += ",\"grid_same_side_while_tp\":false},\"grid\":{\"step_price\":5,\"sell_below_lowest\":true,\"buy_above_highest";
+   s += "\":true,\"max_trades\":12,\"after_max\":\"wait_tp_sl\"},\"lots\":[{\"from\":1,\"to\":3,\"lot\":0.01},{\"from\":4,\"to\"";
+   s += ":6,\"lot\":0.02},{\"from\":7,\"to\":9,\"lot\":0.03},{\"from\":10,\"to\":12,\"lot\":0.04}],\"basket\":{\"preset\":\"B\",\"";
+   s += "sl_base\":\"balance_at_basket_start\",\"presets\":{\"A\":{\"tp_usd\":10,\"sl_pct_balance\":null,\"trail\":null},\"";
+   s += "B\":{\"tp_usd\":null,\"sl_pct_balance\":1,\"trail\":{\"start_usd\":10,\"drop_usd\":5}},\"C\":{\"tp_usd\":10,\"sl_pct";
+   s += "_balance\":1,\"trail\":null}}},\"daily\":{\"target_pct\":1,\"loss_pct\":5,\"base\":\"day_start_equity\",\"reset_ti";
+   s += "me\":\"07:00\",\"tz\":\"IST\",\"on_hit\":\"close_all_stop_day\",\"open_basket_at_reset\":\"keep\"},\"costs\":{\"commis";
+   s += "sion_per_lot\":0,\"swap\":false},\"filters\":{\"max_spread_points\":0,\"time\":{\"enabled\":false,\"from\":\"00:00";
+   s += "\",\"to\":\"23:59\",\"tz\":\"IST\"},\"news\":{\"enabled\":false,\"before_min\":30,\"after_min\":30},\"friday_stop\":{\"e";
+   s += "nabled\":false,\"time\":\"14:00\",\"tz\":\"IST\"}}}";
    return s;
   }
 
@@ -401,6 +411,13 @@ bool LoadConfig(string &err)
    g_timeOn    = JBool(root, "filters.time.enabled", false);
    g_tFrom     = HhmmToMin(JStr(root, "filters.time.from", "00:00"));
    g_tTo       = HhmmToMin(JStr(root, "filters.time.to", "23:59"));
+   g_friOn     = JBool(root, "filters.friday_stop.enabled", false);
+   g_friMin    = HhmmToMin(JStr(root, "filters.friday_stop.time", "14:00"));
+   if(g_friOn && g_friMin < 0) err += "filters.friday_stop.time galat; ";
+   g_newsOn     = JBool(root, "filters.news.enabled", false);
+   g_newsBefore = (int)JNum(root, "filters.news.before_min", 30, false, err);
+   g_newsAfter  = (int)JNum(root, "filters.news.after_min", 30, false, err);
+   g_newsLoaded = 0;
 
    delete root;
    return (err == "");
@@ -485,6 +502,70 @@ bool TimeOk(const datetime srv)
    long m = (((long)ToIst(srv) % 86400) + 86400) % 86400 / 60;
    if(g_tFrom <= g_tTo) return (m >= g_tFrom && m <= g_tTo);
    return (m >= g_tFrom || m <= g_tTo);
+  }
+
+// Friday stop (IST): Friday friday_stop.time ke baad, Saturday, Sunday = nayi basket nahi (app jaisa)
+bool FridayOk(const datetime srv)
+  {
+   if(!g_friOn) return true;
+   MqlDateTime d; TimeToStruct(ToIst(srv), d);
+   int m = d.hour * 60 + d.min;
+   return !((d.day_of_week == 5 && m >= g_friMin) || d.day_of_week == 6 || d.day_of_week == 0);
+  }
+
+//====================================================================
+//  NEWS FILTER (MT5 Economic Calendar, High impact, live only)
+//====================================================================
+void LoadNews()
+  {
+   g_newsLoaded = TimeCurrent();
+   ArrayResize(g_newsT, 0); ArrayResize(g_newsN, 0);
+   if(!g_newsOn || MQLInfoInteger(MQL_TESTER)) return;
+   datetime now = TimeTradeServer();
+   string cur[];
+   int nc = StringSplit(InpNewsCurrencies, ',', cur);
+   for(int c = 0; c < nc; c++)
+     {
+      string ccy = cur[c];
+      StringTrimLeft(ccy); StringTrimRight(ccy);
+      if(ccy == "") continue;
+      MqlCalendarValue vals[];
+      ResetLastError();
+      CalendarValueHistory(vals, now - 6 * 3600, now + 36 * 3600, NULL, ccy);
+      for(int i = 0; i < ArraySize(vals); i++)
+        {
+         MqlCalendarEvent ev;
+         if(!CalendarEventById(vals[i].event_id, ev)) continue;
+         if(ev.importance != CALENDAR_IMPORTANCE_HIGH) continue;
+         int k = ArraySize(g_newsT);
+         ArrayResize(g_newsT, k + 1); ArrayResize(g_newsN, k + 1);
+         g_newsT[k] = vals[i].time; g_newsN[k] = ccy + " " + ev.name;
+        }
+     }
+  }
+
+string IstHM(const datetime srv) { return TimeToString(ToIst(srv), TIME_MINUTES); }
+
+void UpdateNews()
+  {
+   g_newsBlock = false;
+   if(!g_newsOn) { g_newsTxt = "off"; return; }
+   if(MQLInfoInteger(MQL_TESTER)) { g_newsTxt = "tester (off)"; return; }
+   if(TimeCurrent() - g_newsLoaded > 600) LoadNews();
+   datetime now = TimeTradeServer(), nextT = 0;
+   string nextN = "";
+   for(int i = 0; i < ArraySize(g_newsT); i++)
+     {
+      datetime t = g_newsT[i];
+      if(now >= t - g_newsBefore * 60 && now <= t + g_newsAfter * 60)
+        {
+         g_newsBlock = true;
+         g_newsTxt = "NEWS " + g_newsN[i] + " " + IstHM(t) + " IST  -  " + IstHM(t + g_newsAfter * 60) + " tak nayi basket band";
+         return;
+        }
+      if(t > now && (nextT == 0 || t < nextT)) { nextT = t; nextN = g_newsN[i]; }
+     }
+   g_newsTxt = (nextT > 0) ? "next " + IstHM(nextT) + " IST" : "clear";
   }
 
 //====================================================================
@@ -896,6 +977,9 @@ void TryNewBasket()
    int sp = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(g_maxSpread > 0 && sp > g_maxSpread) return;
    if(!TimeOk(bt)) return;
+   if(!FridayOk(bt)) return;
+   UpdateNews();
+   if(g_newsBlock) return;
    g_basketId++;
    g_firstDir = g_sig;
    g_tpActive = g_tp1On;
@@ -1137,6 +1221,8 @@ void Dash()
    else if(g_dayStopped) { al = "DAILY LOSS LIMIT HIT  -  07:00 IST tak trading band"; ac = C_BAD; ab = C'34,8,8'; }
    else if(g_paused) { al = "PAUSED  -  nayi trade band, khuli basket ke TP/SL chal rahe hain"; ac = C_WARN; ab = C'34,24,6'; }
    else if(!Paper() && InpOwnMode && InpAllocBalance > accEq) { al = StringFormat("DHYAN: base $%.0f > account equity $%.2f  -  daily loss / SL account se bade ho sakte hain", InpAllocBalance, accEq); ac = C_WARN; ab = C'34,24,6'; }
+   else if(n == 0 && !FridayOk(NowServer())) { al = "FRIDAY STOP  -  Friday " + TimeToString((datetime)(g_friMin * 60), TIME_MINUTES) + " IST ke baad / weekend nayi basket nahi"; ac = C_WARN; ab = C'34,24,6'; }
+   else if(n == 0 && g_newsBlock) { al = g_newsTxt; ac = C_WARN; ab = C'34,24,6'; }
    else if(g_maxSpread > 0 && sp > g_maxSpread) { al = StringFormat("Spread high: %d pts (max %d)  -  nayi basket ruki", sp, g_maxSpread); ac = C_WARN; ab = C'34,24,6'; }
    else if(g_warnMsg != "") { al = g_warnMsg; ac = C_WARN; ab = C'34,24,6'; }
    else if(n == 0 && g_sig == 0) { al = "Supertrend signal ka wait (warmup)"; ac = C_MUT; }
@@ -1177,6 +1263,7 @@ void Dash()
           Dot() + "Basket TP " + (g_tpOn ? Money(g_tpUsd) : "off") + Dot() + "SL " + (g_slOn ? DoubleToString(g_slPct, 2) + "%" : "off") +
           Dot() + "Trail " + (g_trailOn ? DoubleToString(g_trStart, 0) + "/" + DoubleToString(g_trDrop, 0) : "off"), P(M), P(322), 10, C_MUT);
       Lbl("info2", "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp + " pts" +
+          Dot() + "News " + (g_newsBlock ? "BLOCK" : g_newsTxt) + Dot() + "Fri " + (g_friOn ? TimeToString((datetime)(g_friMin * 60), TIME_MINUTES) + " IST" : "off") +
           Dot() + (Paper() ? "PAPER" : "LIVE") + Dot() + (InpOwnMode ? "Base $" + DoubleToString(InpAllocBalance, 0) + " (sirf % ke liye)" : "Account P/L mode") +
           (InpMinMarginLevel > 0 ? Dot() + "Margin guard " + DoubleToString(InpMinMarginLevel, 0) + "%" : ""), P(M), P(340), 10, C_MUT);
      }
@@ -1318,6 +1405,7 @@ void OnTick()
 
 void OnTimer()
   {
+   if(g_ready) UpdateNews();
    if(InpDashboard) Dash();
   }
 
