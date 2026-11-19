@@ -87,7 +87,13 @@
 
 ## Pending / next
 - [x] v0.6.1 "GitHub se Data" (INVESTOR-ID v1.13 M1 export) — INVESTOR-ID PR #28 merge + pehla asli run baaki
-- [ ] QUAD ka asli data pe backtest (Auto + Worst-case, phir NO_GRID/NO_MARTI/… compare)
+- [x] QUAD ka pehla asli backtest (19 Nov 2026): Exness-MT5Trial17 XAUUSDm M1, 100,000 bars = 10 Aug → 19 Nov 2026 (101 din; MT5 maxbars 100k pe ruka), $10,000, CSV spread (median 240 pts):
+  - ALL Auto: **−$1,561 (−15.6%)**, max DD 16.8%, PF 0.66, 53 trades/din, 296 cycle TP (+$10) vs 24 cycle SL (−$150) + 6 peak stop; 35 green / 52 red din; har mahina minus (Sep ~0)
+  - ALL Worst-case: −$3,749 (−37.5%), DD 37.9%
+  - Har EA minus (Auto): GRID −667, BREAKOUT −370, MARTI −306, PYRAMID −218. Koi preset (NO_GRID/NO_MARTI/NO_PYRAMID/NO_BREAKOUT) plus mein nahi; sabse kam bura NO_BREAKOUT Auto −6.8% (Worst −28.5%)
+  - Spread 0 pe bhi −$887 (−8.9%) → spread se zyada, design mein hi edge nahi. Chhota +$10 TP vs bade loss (cap $50–60, cycle SL $150) ka asantulan
+  - Daily −2% hard stop din ka loss rokta hai (worst din −$170), lekin lagatar laal din jud ke DD 17% — "max DD 2%" sirf ek din ka hai, poore period ka nahi
+- [ ] **Faisla baaki (Ankush):** live EA abhi NAHI banane. Redesign ya idea chhodna — options chat mein
 - [ ] Achha result → 4 live EA (GRID/MARTI/PYRAMID/BREAKOUT) + SAMU QUAD TESTER, naya repo SAMU-QUAD-BASKET
 - [x] EA v1.01 VPS pe compile OK + chal raha (19 Nov 13:29 IST, pehli SELL)
 - [x] `feature-ea-v1.03` main mein merge (19 Nov, Ankush ke kehne par; v1.02 bhi isi mein)
