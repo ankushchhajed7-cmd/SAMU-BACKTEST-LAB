@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
-//|                                    SAMU Universal EA v1.00.mq5   |
+//|                                    SAMU Universal EA v1.01.mq5   |
 //|  Reads a SAMU strategy JSON (schema samu-strategy/1) and trades  |
 //|  it with the same rules as SAMU Backtest Lab                     |
 //|  (docs/ENGINE-RULES.md). Gold Luxe full-screen dashboard.        |
 //+------------------------------------------------------------------+
 #property copyright   "SAMU"
-#property version     "1.00"
+#property version     "1.01"
 #property description "SAMU Universal EA: JSON strategy (MQL5\\Files), Supertrend first trade, step grid basket, lot table, basket TP/SL/trailing, daily target/loss, 07:00 IST reset."
 #property tester_file "step-basket.json"
 
@@ -21,9 +21,13 @@ input int    InpSTBars         = 600;                // Supertrend history bars
 input bool   InpDashboard      = true;               // Gold Luxe dashboard
 input bool   InpHidePriceChart = true;               // Hide price chart behind dashboard
 input bool   InpLogTrades      = true;               // Trade log CSV (for Parity)
+input bool   InpOwnMode        = true;               // Own P/L mode: daily % + basket SL sirf is EA ke trades se
+input double InpAllocBalance   = 1000;               // Own mode: is EA ko diya gaya balance ($)
+input datetime InpAllocFrom    = 0;                  // Own mode: realized P/L kab se gine (0 = pehli baar chalne se)
+input double InpMinMarginLevel = 300;                // Nayi trade tabhi jab margin level >= ye % (0 = off)
 
 #define EA_NAME    "SAMU Universal EA"
-#define EA_VERSION "v1.00"
+#define EA_VERSION "v1.01"
 #define PFX        "SAMUUEA_"
 #define IST_SEC    19800
 
@@ -423,6 +427,9 @@ CTrade  trade;
 bool    g_ready = false;
 string  g_cfgErr = "";
 string  g_warnMsg = "";
+datetime g_since = 0;          // own mode: realized P/L start
+double  g_realized = 0;        // own mode: closed P/L of this EA since g_since
+bool    g_realDirty = true;
 long    g_basketId = 0;
 int     g_firstDir = 0;
 bool    g_tpActive = false;     // first-trade TP still on
@@ -577,11 +584,78 @@ ulong FirstPos(int &dir, double &op)
    return tk;
   }
 
+//--- own P/L mode: EA ka apna "balance" = allocated + is EA ka realized P/L
+void CalcRealized()
+  {
+   g_realized = 0; g_realDirty = false;
+   if(!HistorySelect(g_since, TimeCurrent() + 86400)) { g_realDirty = true; return; }
+   int n = HistoryDealsTotal();
+   for(int i = 0; i < n; i++)
+     {
+      ulong d = HistoryDealGetTicket(i);
+      if(d == 0) continue;
+      if(HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol || HistoryDealGetInteger(d, DEAL_MAGIC) != InpMagic) continue;
+      long en = HistoryDealGetInteger(d, DEAL_ENTRY);
+      if(en == DEAL_ENTRY_OUT || en == DEAL_ENTRY_INOUT || en == DEAL_ENTRY_OUT_BY)
+         g_realized += HistoryDealGetDouble(d, DEAL_PROFIT) + HistoryDealGetDouble(d, DEAL_SWAP) + HistoryDealGetDouble(d, DEAL_COMMISSION);
+      else if(en == DEAL_ENTRY_IN)
+         g_realized += HistoryDealGetDouble(d, DEAL_COMMISSION);
+     }
+  }
+double EaBalance()
+  {
+   if(!InpOwnMode) return AccountInfoDouble(ACCOUNT_BALANCE);
+   if(g_realDirty) CalcRealized();
+   return InpAllocBalance + g_realized;
+  }
+double EaEquity()
+  {
+   if(!InpOwnMode) return AccountInfoDouble(ACCOUNT_EQUITY);
+   return EaBalance() + BasketPL();
+  }
+//--- margin guard: purane EAs ka margin na khaaye
+bool MarginOk(const int dir, const double lot, string &why)
+  {
+   if(InpMinMarginLevel <= 0) return true;
+   double price = (dir == 1) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID), m = 0;
+   if(!OrderCalcMargin(dir == 1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, lot, price, m)) return true;
+   double used = AccountInfoDouble(ACCOUNT_MARGIN) + m, eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(used <= 0) return true;
+   double lvl = eq / used * 100.0;
+   if(lvl >= InpMinMarginLevel) return true;
+   why = StringFormat("Margin guard: trade ke baad margin level %.0f%% < %.0f%%  -  nayi trade nahi khuli", lvl, InpMinMarginLevel);
+   return false;
+  }
+//--- magic clash: same magic kisi aur EA ka to nahi?
+bool MagicClash(string &why)
+  {
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong t = PositionGetTicket(i);
+      if(t == 0 || PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      if(StringFind(PositionGetString(POSITION_COMMENT), "SAMU#") != 0 || PositionGetString(POSITION_SYMBOL) != _Symbol)
+        { why = StringFormat("Magic %I64d pe kisi aur EA / symbol ki khuli trade hai (%s). InpMagic badlo.", InpMagic, PositionGetString(POSITION_SYMBOL)); return true; }
+     }
+   if(HistorySelect(TimeCurrent() - 30 * 86400, TimeCurrent() + 86400))
+     {
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+        {
+         ulong d = HistoryDealGetTicket(i);
+         if(d == 0 || HistoryDealGetInteger(d, DEAL_MAGIC) != InpMagic || HistoryDealGetInteger(d, DEAL_ENTRY) != DEAL_ENTRY_IN) continue;
+         if(StringFind(HistoryDealGetString(d, DEAL_COMMENT), "SAMU#") != 0 || HistoryDealGetString(d, DEAL_SYMBOL) != _Symbol)
+           { why = StringFormat("Magic %I64d pichhle 30 din mein kisi aur EA / symbol ne use kiya (%s). InpMagic badlo.", InpMagic, HistoryDealGetString(d, DEAL_SYMBOL)); return true; }
+        }
+     }
+   return false;
+  }
+
 void SetErr(const string e) { g_lastErr = e; g_lastErrT = TimeCurrent(); Print(EA_NAME, ": ", e); }
 
 bool OpenTrade(const int dir, const int n)
   {
    double lot = NormLot(g_lotVal[LotIndexFor(n)]);
+   string why = "";
+   if(!MarginOk(dir, lot, why)) { SetErr(why); return false; }
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double tp = 0;
    if(n == 1 && g_tp1On) tp = NormalizeDouble(dir == 1 ? ask + g_tp1 : bid - g_tp1, _Digits);
@@ -640,7 +714,7 @@ void NewDayCheck()
    if(dk != g_dayKey)
      {
       g_dayKey = dk;
-      g_dayStartEq = AccountInfoDouble(ACCOUNT_EQUITY);
+      g_dayStartEq = EaEquity();
       g_dayStopped = false; g_dayStopReason = "";
       SaveState();
      }
@@ -651,7 +725,7 @@ void ManageBasket()
    for(int guard = 0; guard < 3; guard++)
      {
       int n = CountPos();
-      double pl = BasketPL(), eq = AccountInfoDouble(ACCOUNT_EQUITY);
+      double pl = BasketPL(), eq = EaEquity();
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(n > 0) { if(pl > g_peak) g_peak = pl; if(pl < g_bMin) g_bMin = pl; }
       if(!g_dayStopped)
@@ -694,7 +768,7 @@ void TryNewBasket()
    g_firstDir = g_sig;
    g_tpActive = g_tp1On;
    g_peak = -1e18; g_bMin = 0;
-   g_bStartBal = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_bStartBal = EaBalance();
    if(!OpenTrade(g_sig, 1)) { g_basketId--; g_tpActive = false; }
    SaveState();
   }
@@ -745,7 +819,7 @@ void LogDeal(const ulong deal)
 
 void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
   {
-   if(trans.type == TRADE_TRANSACTION_DEAL_ADD) LogDeal(trans.deal);
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD) { g_realDirty = true; LogDeal(trans.deal); }
   }
 
 //====================================================================
@@ -896,12 +970,15 @@ void Dash()
    Lbl("srv", "SERVER  " + TimeToString(srv, TIME_SECONDS), W - M, P(38), 12, C_MUT, F_MONO, true);
 
    // equity
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY), bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq = g_ready ? EaEquity() : AccountInfoDouble(ACCOUNT_EQUITY), bal = g_ready ? EaBalance() : AccountInfoDouble(ACCOUNT_BALANCE);
    int n = g_ready ? CountPos() : 0;
    double pl = g_ready ? BasketPL() : 0;
-   Lbl("eqT", Spaced("EQUITY"), M, P(72), 10, C_GOLD);
+   Lbl("eqT", Spaced(InpOwnMode ? "EQUITY  (EA)" : "EQUITY"), M, P(72), 10, C_GOLD);
    Lbl("eq", Money(eq), M, P(86), 50, C_GOLD, F_SERIF);
-   Lbl("eqS", "Balance " + Money(bal) + "     Floating " + Money(pl), M, P(152), 12, C_MUT);
+   double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   Lbl("eqS", (InpOwnMode ? "EA balance " : "Balance ") + Money(bal) + "     Floating " + Money(pl) +
+       (InpOwnMode ? "     Account equity " + Money(AccountInfoDouble(ACCOUNT_EQUITY)) : "") +
+       "     Margin " + (ml > 0 ? DoubleToString(ml, 0) + "%" : "-"), M, P(152), 12, C_MUT);
 
    // alert banner
    string al; color ac = C_TXT, ab = C'14,12,6';
@@ -946,7 +1023,7 @@ void Dash()
    string info = "Step $" + DoubleToString(g_step, 2) + Dot() + "Lots " + lots + Dot() + "TP1 " + (g_tp1On ? "$" + DoubleToString(g_tp1, 2) : "off") +
                  Dot() + "Basket TP " + (g_tpOn ? Money(g_tpUsd) : "off") + Dot() + "SL " + (g_slOn ? DoubleToString(g_slPct, 2) + "%" : "off") +
                  Dot() + "Trail " + (g_trailOn ? DoubleToString(g_trStart, 0) + "/" + DoubleToString(g_trDrop, 0) : "off") +
-                 Dot() + "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp;
+                 Dot() + "Daily +" + DoubleToString(g_dTgt, 1) + "% / -" + DoubleToString(g_dLoss, 1) + "%" + Dot() + "Spread " + (string)sp + Dot() + (InpOwnMode ? "Own P/L " + Money(InpAllocBalance) : "Account P/L") + (InpMinMarginLevel > 0 ? Dot() + "Margin >= " + DoubleToString(InpMinMarginLevel, 0) + "%" : "");
    Lbl("info", info, M, by + P(44), 11, C_MUT);
 
    // trade table
@@ -1004,6 +1081,20 @@ int OnInit()
       return INIT_SUCCEEDED;
      }
    g_warnMsg = "";
+   // own mode start time
+   if(InpAllocFrom > 0) g_since = InpAllocFrom;
+   else { g_since = (datetime)GVGet("since", 0); if(g_since == 0) { g_since = TimeCurrent(); GVSet("since", (double)g_since); } }
+   g_realDirty = true;
+   string clash = "";
+   if(MagicClash(clash))
+     {
+      g_ready = false; g_cfgErr = clash;
+      Print(EA_NAME, ": ", clash); Alert(EA_NAME, ": ", clash);
+      if(MQLInfoInteger(MQL_TESTER)) return INIT_PARAMETERS_INCORRECT;
+      if(InpDashboard) { if(InpHidePriceChart) ChartSetInteger(0, CHART_SHOW, false); Dash(); }
+      EventSetTimer(1);
+      return INIT_SUCCEEDED;
+     }
    if(g_cfgSource == "built-in") g_warnMsg = "MQL5\\Files\\" + InpStrategyFile + " nahi mili  -  built-in Step Basket settings se chal raha hai";
    if(g_cfgSymbol != "" && g_cfgSymbol != _Symbol) g_warnMsg = "Strategy symbol " + g_cfgSymbol + " hai, chart " + _Symbol + " hai";
    double cs = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
@@ -1016,7 +1107,7 @@ int OnInit()
    if((long)GVGet("dayKey", -1) == dk)
      {
       g_dayKey = dk;
-      g_dayStartEq = GVGet("dayStartEq", AccountInfoDouble(ACCOUNT_EQUITY));
+      g_dayStartEq = GVGet("dayStartEq", EaEquity());
       int ds = (int)GVGet("dayStopped", 0);
       g_dayStopped = ds > 0; g_dayStopReason = ds == 1 ? "DAY_TARGET" : ds == 2 ? "DAY_LOSS" : "";
      }
@@ -1028,7 +1119,7 @@ int OnInit()
       g_tpActive  = (n == 1 && g_tp1On && PositionSelectByTicket(tk) && PositionGetDouble(POSITION_TP) != 0);
       g_peak      = GVGet("peak", BasketPL());
       g_bMin      = GVGet("bMin", 0);
-      g_bStartBal = GVGet("bStartBal", AccountInfoDouble(ACCOUNT_BALANCE));
+      g_bStartBal = GVGet("bStartBal", EaBalance());
      }
    NewDayCheck();
    g_lastBar = iTime(_Symbol, PERIOD_M1, 0);   // naya basket agle M1 bar se
@@ -1041,8 +1132,8 @@ int OnInit()
       Dash();
      }
    EventSetTimer(1);
-   PrintFormat("%s %s ready (%s): %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
-               EA_NAME, EA_VERSION, g_cfgSource, g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
+   PrintFormat("%s %s ready (%s, %s): %s %s preset %s, step %.2f, max %d, TP1 %s, daily +%.1f%%/-%.1f%%",
+               EA_NAME, EA_VERSION, g_cfgSource, InpOwnMode ? "own P/L $" + DoubleToString(InpAllocBalance, 0) : "account P/L", g_name, g_ver, g_preset, g_step, g_maxT, g_tp1On ? DoubleToString(g_tp1, 2) : "off", g_dTgt, g_dLoss);
    return INIT_SUCCEEDED;
   }
 

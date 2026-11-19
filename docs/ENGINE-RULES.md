@@ -50,10 +50,12 @@ Check ka order: daily target → daily loss → basket TP → basket SL → trai
 ## Not modelled yet
 Slippage (sirf spread hai), swap, margin / stop-out, news filter, requotes.
 
-## Universal EA (v1.00) — live mein kya alag hai
+## Universal EA (v1.01) — live mein kya alag hai
 - Prices **asli tick** ke bid/ask (app: M1 bar ke 4 points). Isliye fill thoda alag ho sakta hai (slippage).
 - Basket P/L = position profit + **swap** − commission (app: swap = 0).
 - Pehle trade ka TP broker pe bhi lagta hai (safety), aur EA khud bhi check karta hai. Doosra trade khulte hi broker TP hata diya jaata hai.
 - Supertrend: chart history ke aakhri `InpSTBars` (600) bars se. App data ki shuruaat se calculate karta hai, isliye **data ke pehle 1–2 din** mein signal thoda alag ho sakta hai, baad mein same.
 - Daily target/loss har tick pe check (app: har price event pe) — natija same.
 - Nayi basket: naye M1 bar ka pehla tick (app: M1 bar open price).
+- **Own P/L mode** (v1.01, default): EA ka balance = `InpAllocBalance` + is EA (magic + symbol) ka realized P/L; equity = wo + basket floating. Daily % aur basket SL isi se — backtest ke "starting balance" jaisa.
+- **Margin guard** (v1.01): margin level < `InpMinMarginLevel` ho to nayi trade skip. App ise model nahi karta (app mein margin nahi hai).
