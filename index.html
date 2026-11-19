@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.7.0</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.8.0</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -227,6 +227,7 @@ section.scr.on{display:block}
       <button class="btn small" id="btnStep10">Step $10 (lot table)</button>
       <button class="btn small" id="btnStep10f">Step $10 (0.01)</button>
       <button class="btn small" id="btnSweep">Liquidity Sweep (QUANT PILOT)</button>
+      <button class="btn small" id="btnPyr">Trend Pyramid</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -436,7 +437,7 @@ section.scr.on{display:block}
 </nav>
 
 <script id="engine">
-/* ===================== SAMU ENGINE v0.7.0 =====================
+/* ===================== SAMU ENGINE v0.8.0 =====================
    Pure functions, no DOM. Rules are documented in docs/ENGINE-RULES.md
    (Universal EA must follow the same rules for parity). */
 var SamuEngine = (function () {
@@ -492,6 +493,7 @@ var SamuEngine = (function () {
   function run(ds, st, opt) {
     if (st && st.schema === 'samu-strategy/2') return runQuad(ds, st, opt);
     if (st && st.schema === 'samu-strategy/3') return runSweep(ds, st, opt);
+    if (st && st.schema === 'samu-strategy/4') return runPyramid(ds, st, opt);
     opt = opt || {};
     var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s;
     var N = T.length;
@@ -1529,6 +1531,229 @@ var SamuEngine = (function () {
     return r;
   }
 
+  /* ---------- TREND PYRAMID engine (schema samu-strategy/4) ----------
+     Rules: docs/PYRAMID-RULES.md. H1 EMA trend ki side turant entry, profit pe add (pyramid),
+     har add ke baad tight trailing SL, optional loss-side grid (combo). */
+  function runPyramid(ds, st, opt) {
+    opt = opt || {};
+    var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s, N = T.length;
+    var cs = st.contract_size, point = opt.point || st.point;
+    var off = (opt.offset != null ? opt.offset : st.server_gmt_offset_hours) || 0;
+    var presetKey = opt.preset || st.basket.preset, PR = (st.basket.presets && st.basket.presets[presetKey]) || {};
+    var pv = function (k, def) { return PR[k] != null ? PR[k] : def; };
+    var py = st.pyramid || {}, lg = st.loss_grid || {}, tr = st.trend || {}, at = st.atr || {}, en = st.entry || {};
+    var lot = pv('lot', st.lot || 0.01);
+    var step = pv('step_price', py.step_price), maxAdds = pv('max_adds', py.max_adds);
+    var trailGap = pv('trail_gap_price', py.trail_gap_price != null ? py.trail_gap_price : step);
+    var tpUsd = pv('tp_usd', st.basket.tp_usd); if (!tpUsd) tpUsd = null;
+    var levels = pv('loss_levels', lg.levels || 0);
+    var gapAtr = pv('gap_atr', lg.gap_atr), recUsd = pv('recover_usd', lg.recover_usd), maxLoss = pv('max_loss_usd', lg.max_loss_usd);
+    if (!maxLoss) maxLoss = null; if (recUsd == null) recUsd = null;
+    var slAtr = pv('first_sl_atr', st.first_sl_atr);
+    var d = st.daily || {}, dTgt = d.target_usd || 0, dLoss = d.loss_usd || 0;
+    var rp = (d.reset_time || '07:00').split(':'), resetSec = (+rp[0]) * 3600 + (+rp[1]) * 60;
+    var comm = (st.costs && st.costs.commission_per_lot) || 0;
+    var f = st.filters || {}, maxSpPts = f.max_spread_points || 0;
+    var fc = f.friday_close && f.friday_close.enabled ? f.friday_close.server_time.split(':') : null;
+    var friMin = fc ? (+fc[0]) * 60 + (+fc[1]) : 0;
+    var flipClose = en.flip_close_reverse !== false;
+    var pathMode = opt.path || 'auto';
+    var spreadFixed = opt.spreadMode === 'fixed' || !SP;
+    var fixedPts = opt.fixedPts != null ? opt.fixedPts : 200, fixedSpr = fixedPts * point;
+    if (!(step > 0)) throw new Error('pyramid.step_price > 0 chahiye');
+    if (levels === 0 && !(slAtr > 0)) throw new Error('loss_levels 0 ho to first_sl_atr > 0 chahiye (pehle trade ka SL)');
+
+    // trend: H1 EMA fast vs slow, last CLOSED bar
+    var ttf = TF[tr.tf || 'H1'], RH = resample(T, O, H, L, C, ttf);
+    var eF = ema(RH.c, tr.ema_fast || 50), eS = ema(RH.c, tr.ema_slow || 200);
+    var atf = TF[at.tf || 'M15'], RA = resample(T, O, H, L, C, atf);
+    var AT = atr(RA.h, RA.l, RA.c, at.period || 14, at.method || 'sma');
+    var hI = 0, aI = 0;
+    function trendAt(t) {
+      while (hI < RH.t.length && RH.t[hI] + ttf <= t) hI++;
+      var k = hI - 1; if (k < 0 || isNaN(eF[k]) || isNaN(eS[k])) return 0;
+      return eF[k] > eS[k] ? 1 : eF[k] < eS[k] ? -1 : 0;
+    }
+    function atrAt(t) {
+      while (aI < RA.t.length && RA.t[aI] + atf <= t) aI++;
+      var k = aI - 1; return k >= 0 ? AT[k] : NaN;
+    }
+
+    var i0 = 0, i1 = N - 1;
+    if (opt.from != null) while (i0 < N && T[i0] < opt.from) i0++;
+    if (opt.to != null) while (i1 >= 0 && T[i1] >= opt.to) i1--;
+    if (i1 < i0) throw new Error('Is date range mein data nahi hai');
+    var n1 = i1 - i0 + 1;
+    var startBal = opt.balance || 1000;
+    var trades = [], baskets = [], dayStops = [], days = [];
+    var eqClose = new Float64Array(n1), eqLow = new Float64Array(n1), barT = new Float64Array(n1);
+    var S = { bal: startBal, pos: [], A: 0, K: 0, maxE: 0, minE: 0, dir: 0, adds: 0, gridN: 0, sl: null, atrB: 0, nextTid: 1,
+      bId: 0, bOpenT: 0, bStartBal: 0, peak: -Infinity, bMin: 0, maxN: 0, dayKey: null, dayStartEq: startBal, dayStopped: false, eqMin: Infinity, ev: [] };
+    function clone(s) {
+      var c = {}; for (var k in s) c[k] = s[k];
+      c.pos = s.pos.map(function (p) { return { id: p.id, dir: p.dir, lot: p.lot, op: p.op, ot: p.ot, kind: p.kind }; });
+      c.ev = []; return c;
+    }
+    function recalc(s, spr) {
+      var A = 0, K = 0, mx = -Infinity, mn = Infinity;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], v = p.lot * cs;
+        if (p.dir === 1) { A += v; K -= p.op * v; } else { A -= v; K += (p.op - spr) * v; }
+        K -= comm * p.lot;
+        if (p.op > mx) mx = p.op; if (p.op < mn) mn = p.op;
+      }
+      s.A = A; s.K = K; s.maxE = mx; s.minE = mn;
+    }
+    function PL(s, p) { return s.pos.length ? s.A * p + s.K : 0; }
+    function openPos(s, bid, spr, t, kind) {
+      var price = s.dir === 1 ? bid + spr : bid;
+      s.pos.push({ id: s.nextTid++, dir: s.dir, lot: lot, op: price, ot: t, kind: kind });
+      if (s.pos.length > s.maxN) s.maxN = s.pos.length;
+      recalc(s, spr);
+      return price;
+    }
+    function closeAll(s, bid, spr, t, reason) {
+      var tot = 0;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], cp = p.dir === 1 ? bid : bid + spr;
+        var pr = p.dir * (cp - p.op) * p.lot * cs - comm * p.lot;
+        tot += pr;
+        s.ev.push({ k: 'T', id: p.id, b: s.bId, dir: p.dir, lot: p.lot, ot: p.ot, op: p.op, ct: t, cp: cp, pr: pr, r: reason, kind: p.kind });
+      }
+      s.bal += tot;
+      s.ev.push({ k: 'B', id: s.bId, dir: s.dir, ot: s.bOpenT, ct: t, n: s.pos.length, pr: tot, r: reason, minPL: s.bMin, peakPL: s.peak, startBal: s.bStartBal, adds: s.adds, grid: s.gridN });
+      s.pos = []; s.A = 0; s.K = 0; s.sl = null; s.adds = 0; s.gridN = 0;
+    }
+    function stopDay(s, bid, spr, t, reason) {
+      if (s.pos.length) closeAll(s, bid, spr, t, reason);
+      s.dayStopped = true;
+      s.ev.push({ k: 'D', t: t, r: reason, day: s.dayKey });
+    }
+    function trackEq(s, p) {
+      var pl = PL(s, p), eq = s.bal + pl;
+      if (eq < s.eqMin) s.eqMin = eq;
+      if (s.pos.length) { if (pl > s.peak) s.peak = pl; if (pl < s.bMin) s.bMin = pl; }
+    }
+    // check order: daily target → daily loss → basket TP → max loss → recover → SL/trailing → pyramid add → loss grid
+    function checkAt(s, p, spr, t) {
+      for (var guard = 0; guard < 100; guard++) {
+        trackEq(s, p);
+        var n = s.pos.length; if (!n) return;
+        var pl = PL(s, p), eq = s.bal + pl, D = s.dir;
+        if (!s.dayStopped) {
+          if (dTgt && eq >= s.dayStartEq + dTgt - EPS) { stopDay(s, p, spr, t, 'DAY_TARGET'); continue; }
+          if (dLoss && eq <= s.dayStartEq - dLoss + EPS) { stopDay(s, p, spr, t, 'DAY_LOSS'); continue; }
+        }
+        if (tpUsd != null && pl >= tpUsd - EPS) { closeAll(s, p, spr, t, 'BASKET_TP'); continue; }
+        if (levels > 0 && maxLoss != null && pl <= -maxLoss + EPS) { closeAll(s, p, spr, t, 'MAX_LOSS'); continue; }
+        if (s.gridN > 0 && recUsd != null && pl >= recUsd - EPS) { closeAll(s, p, spr, t, 'RECOVER'); continue; }
+        if (s.sl != null && (D === 1 ? p <= s.sl + EPS : p + spr >= s.sl - EPS)) { closeAll(s, p, spr, t, s.adds ? 'TRAIL' : 'SL'); continue; }
+        if (s.dayStopped) return;
+        if (s.gridN === 0 && s.adds < maxAdds && (D === 1 ? p + spr >= s.maxE + step - EPS : p <= s.minE - step + EPS)) {
+          var op = openPos(s, p, spr, t, 'ADD'); s.adds++; s.sl = op - D * trailGap; continue;
+        }
+        var gap = s.atrB * gapAtr;
+        if (s.adds === 0 && s.gridN < levels && gap > 0 && (D === 1 ? p + spr <= s.minE - gap + EPS : p >= s.maxE + gap - EPS)) {
+          openPos(s, p, spr, t, 'GRID'); s.gridN++; continue;
+        }
+        return;
+      }
+    }
+    function walk(s, a, b, spr, t) {
+      for (var guard = 0; guard < 2000; guard++) {
+        checkAt(s, a, spr, t);
+        if (Math.abs(b - a) < 1e-12) return;
+        var up = b > a, best = b, n = s.pos.length, D = s.dir;
+        var cand = function (x) { if (up ? (x > a + 1e-9 && x < best) : (x < a - 1e-9 && x > best)) best = x; };
+        if (n) {
+          if (s.A !== 0) {
+            var plT = function (v) { cand((v - s.K) / s.A); };
+            if (tpUsd != null) plT(tpUsd);
+            if (levels > 0 && maxLoss != null) plT(-maxLoss);
+            if (s.gridN > 0 && recUsd != null) plT(recUsd);
+            if (!s.dayStopped && dTgt) plT(s.dayStartEq + dTgt - s.bal);
+            if (!s.dayStopped && dLoss) plT(s.dayStartEq - dLoss - s.bal);
+          }
+          if (s.sl != null) cand(D === 1 ? s.sl : s.sl - spr);
+          if (!s.dayStopped) {
+            if (s.gridN === 0 && s.adds < maxAdds) cand(D === 1 ? s.maxE + step - spr : s.minE - step);
+            var gap = s.atrB * gapAtr;
+            if (s.adds === 0 && s.gridN < levels && gap > 0) cand(D === 1 ? s.minE - gap - spr : s.maxE + gap);
+          }
+        }
+        trackEq(s, best);
+        a = best;
+      }
+    }
+    function friBlocked(t) {      // server time: Friday friday_close ke baad + Sat/Sun
+      if (!fc) return false;
+      var x = t - 0, dow = new Date(x * 1000).getUTCDay(), m = Math.floor(((x % 86400) + 86400) % 86400 / 60);
+      return (dow === 5 && m >= friMin) || dow === 6 || dow === 0;
+    }
+    function simBar(s, pts, spr, t, sig, spPts, atrNow, fri) {
+      s.eqMin = Infinity;
+      if (s.pos.length && fri) closeAll(s, pts[0], spr, t, 'FRIDAY');
+      if (s.pos.length && flipClose && sig && sig !== s.dir) closeAll(s, pts[0], spr, t, 'FLIP');
+      checkAt(s, pts[0], spr, t);
+      if (!s.pos.length && !s.dayStopped && sig && !fri && !isNaN(atrNow) && (!maxSpPts || spPts <= maxSpPts)) {
+        s.bId++; s.bOpenT = t; s.bStartBal = s.bal; s.peak = -Infinity; s.bMin = 0; s.maxN = 0;
+        s.dir = sig; s.adds = 0; s.gridN = 0; s.atrB = atrNow;
+        var op = openPos(s, pts[0], spr, t, 'FIRST');
+        s.sl = levels === 0 ? op - sig * atrNow * slAtr : null;
+        checkAt(s, pts[0], spr, t);
+      }
+      for (var k = 1; k < pts.length; k++) walk(s, pts[k - 1], pts[k], spr, t);
+    }
+    function flush(s) {
+      for (var i = 0; i < s.ev.length; i++) {
+        var e = s.ev[i];
+        if (e.k === 'T') trades.push(e); else if (e.k === 'B') { e.maxN = e.n; baskets.push(e); } else dayStops.push(e);
+      }
+      s.ev = [];
+    }
+    var curDay = null;
+    for (var i = i0; i <= i1; i++) {
+      var t = T[i], spPts = spreadFixed ? fixedPts : SP[i], spr = spreadFixed ? fixedSpr : SP[i] * point;
+      if (S.pos.length) recalc(S, spr);
+      var dk = Math.floor((t - off * 3600 + IST - resetSec) / 86400);
+      if (dk !== S.dayKey) {
+        if (curDay) { curDay.endEq = eqClose[i - i0 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+        S.dayKey = dk; S.dayStartEq = S.bal + PL(S, O[i]); S.dayStopped = false;
+        curDay = { key: dk, startEq: S.dayStartEq, startT: t };
+      }
+      var sig = opt.forceSignal || trendAt(t), atrNow = atrAt(t), fri = friBlocked(t);
+      var pOLHC = [O[i], L[i], H[i], C[i]], pOHLC = [O[i], H[i], L[i], C[i]];
+      if (pathMode === 'worst') {
+        var s1 = clone(S), s2 = clone(S);
+        simBar(s1, pOLHC, spr, t, sig, spPts, atrNow, fri); simBar(s2, pOHLC, spr, t, sig, spPts, atrNow, fri);
+        var e1 = s1.bal + PL(s1, C[i]), e2 = s2.bal + PL(s2, C[i]);
+        S = (e1 < e2 - 1e-9 || (Math.abs(e1 - e2) <= 1e-9 && s1.eqMin <= s2.eqMin)) ? s1 : s2;
+      } else {
+        simBar(S, pathMode === 'olhc' ? pOLHC : pathMode === 'ohlc' ? pOHLC : (C[i] >= O[i] ? pOLHC : pOHLC), spr, t, sig, spPts, atrNow, fri);
+      }
+      flush(S);
+      var j = i - i0;
+      barT[j] = t; eqClose[j] = S.bal + PL(S, C[i]); eqLow[j] = Math.min(S.eqMin, eqClose[j]);
+      if (opt.onProgress && (j & 16383) === 0) opt.onProgress(j / n1);
+    }
+    if (S.pos.length) { closeAll(S, C[i1], spreadFixed ? fixedSpr : SP[i1] * point, T[i1], 'END'); flush(S); eqClose[n1 - 1] = S.bal; }
+    if (curDay) { curDay.endEq = eqClose[n1 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+    var r = summarize({
+      startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
+      eqClose: eqClose, eqLow: eqLow, barT: barT,
+      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + fixedPts + ' pts' : 'CSV', balance: startBal, offset: off, resetSec: resetSec },
+      strategyName: st.name, from: T[i0], to: T[i1]
+    });
+    var exits = {}, addsH = {};
+    baskets.forEach(function (b) {
+      var e = exits[b.r] || (exits[b.r] = { n: 0, pl: 0 }); e.n++; e.pl += b.pr;
+      var key = b.grid ? 'grid ' + b.grid : 'adds ' + b.adds; addsH[key] = (addsH[key] || 0) + 1;
+    });
+    r.pyr = { exits: exits, adds: addsH, tradesPerDay: days.length ? trades.length / days.length : 0,
+      settings: { lot: lot, step: step, maxAdds: maxAdds, trailGap: trailGap, tpUsd: tpUsd, levels: levels, gapAtr: gapAtr, recUsd: recUsd, maxLoss: maxLoss, slAtr: slAtr } };
+    return r;
+  }
+
   function summarize(r) {
     var peak = r.startBal, mdd = 0, mddPct = 0;
     for (var i = 0; i < r.eqClose.length; i++) {
@@ -1629,13 +1854,13 @@ var SamuEngine = (function () {
     };
   }
 
-  return { run: run, runQuad: runQuad, runSweep: runSweep, mapLevels: mapLevels, detectAt: detectAt, sweepScore: sweepScore, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
+  return { run: run, runQuad: runQuad, runSweep: runSweep, runPyramid: runPyramid, mapLevels: mapLevels, detectAt: detectAt, sweepScore: sweepScore, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.7.0';
+const APP_VERSION = 'v0.8.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -2111,6 +2336,7 @@ function validateStrategy(st) {
   if (err.length) return { err, warn };
   if (st.schema === 'samu-strategy/2') return validateQuad(st);
   if (st.schema === 'samu-strategy/3') return validateSweep(st);
+  if (st.schema === 'samu-strategy/4') return validatePyr(st);
   need(st.schema === 'samu-strategy/1', 'schema "samu-strategy/1" hona chahiye');
   need(typeof st.name === 'string' && st.name, 'name missing');
   need(pos(st.contract_size), 'contract_size > 0 chahiye');
@@ -2234,6 +2460,71 @@ const SWEEP_FORM_GROUPS = [
   ['SL / TP', [['signal.sl_buffer_pips', 'num', 'SL buffer (pips)'], ['signal.tp1_rr', 'num', 'TP1 (R)'], ['signal.tp2_min_rr', 'num', 'TP2 min (R)'], ['manage.breakeven_at_1r', 'bool', '1R pe breakeven'], ['manage.partial_at_tp1', 'bool', 'TP1 pe 50% close'], ['manage.trail_after_tp1', 'bool', 'TP1 ke baad trailing']]],
   ['Guardian', [['risk.risk_pct', 'num', 'Risk % / trade'], ['risk.max_risk_pct', 'num', 'Max risk %'], ['risk.max_open_trades', 'num', 'Max khule trades'], ['risk.daily_dd_kill_pct', 'num', 'Daily DD kill %', 'Nayi entry band'], ['risk.min_rr', 'num', 'Min RR'], ['risk.min_confidence', 'num', 'Min confidence (1–10)'], ['risk.cooldown_min', 'num', 'Level cooldown (min)'], ['risk.spread_limit_price', 'num', 'Max spread ($)']]]
 ];
+/* ---------- TREND PYRAMID (samu-strategy/4) ---------- */
+const isPyr = st => !!st && st.schema === 'samu-strategy/4';
+const dailyLbl = (d, k) => { d = d || {}; return k === 'target' ? (d.target_usd != null ? '$' + d.target_usd : d.target_pct + '%') : (d.loss_usd != null ? '$' + d.loss_usd : d.loss_pct + '%'); };
+function validatePyr(st) {
+  const err = [], warn = [], need = (c, m) => { if (!c) err.push(m); }, pos = v => typeof v === 'number' && v > 0;
+  need(typeof st.name === 'string' && st.name, 'name missing');
+  need(pos(st.contract_size), 'contract_size > 0 chahiye');
+  need(pos(st.point), 'point > 0 chahiye');
+  need(typeof st.server_gmt_offset_hours === 'number', 'server_gmt_offset_hours number chahiye');
+  const tr = st.trend || {}, py = st.pyramid || {}, lg = st.loss_grid || {}, b = st.basket || {}, d = st.daily || {};
+  need(['M15', 'M30', 'H1', 'H4'].includes(tr.tf), 'trend.tf M15/M30/H1/H4');
+  need(Number.isInteger(tr.ema_fast) && Number.isInteger(tr.ema_slow) && tr.ema_fast < tr.ema_slow, 'trend.ema_fast < ema_slow (integer)');
+  need(pos(st.lot), 'lot > 0');
+  need(pos(py.step_price), 'pyramid.step_price > 0');
+  need(Number.isInteger(py.max_adds) && py.max_adds >= 0, 'pyramid.max_adds integer ≥ 0');
+  need(pos(lg.gap_atr) && pos(lg.max_loss_usd), 'loss_grid.gap_atr / max_loss_usd > 0');
+  need(b.presets && b.presets[b.preset], 'basket.preset "' + b.preset + '" presets mein nahi hai');
+  if (b.presets) Object.entries(b.presets).forEach(([n, p]) => {
+    need(Number.isInteger(p.loss_levels) && p.loss_levels >= 0, 'Preset ' + n + ': loss_levels integer ≥ 0');
+    if (p.loss_levels === 0) need(pos(p.first_sl_atr != null ? p.first_sl_atr : st.first_sl_atr), 'Preset ' + n + ': loss grid 0 hai to first_sl_atr > 0 chahiye');
+    if (p.step_price != null) need(pos(p.step_price), 'Preset ' + n + ': step_price > 0');
+  });
+  need(typeof d.target_usd === 'number' && typeof d.loss_usd === 'number', 'daily.target_usd / loss_usd number chahiye');
+  if (st.filters && st.filters.news && st.filters.news.enabled) warn.push('News filter backtest mein nahi chalta (sirf live EA mein)');
+  const stepNow = (b.presets && b.presets[b.preset] && b.presets[b.preset].step_price) || py.step_price;
+  if (stepNow < 5) warn.push('Step $' + stepNow + ' bahut chhota hai: gold ka ek M1 candle hi $2–4 chalta hai, isliye result raaste (Auto / O→L→H→C / Worst) par bahut badalta hai. Matrix chala ke Worst-case zaroor dekho.');
+  return { err, warn };
+}
+function pyrPresetText(p) {
+  return (p.label ? p.label + ' — ' : '') + 'step ' + (p.step_price != null ? '$' + p.step_price : 'default') + ', loss grid ' + p.loss_levels + (p.tp_usd != null ? ', TP ' + (p.tp_usd ? '$' + p.tp_usd : 'off') : '');
+}
+function summarizePyr(st) {
+  const tr = st.trend, py = st.pyramid, lg = st.loss_grid, b = st.basket, d = st.daily, f = st.filters || {}, L = [];
+  const P = (b.presets && b.presets[b.preset]) || {}, stepNow = P.step_price != null ? P.step_price : py.step_price, lvNow = P.loss_levels || 0;
+  L.push('<b>Chuna preset ' + esc(b.preset) + ':</b> step $' + stepNow + ', ' + (lvNow ? 'loss grid ' + lvNow + ' (combo)' : 'loss grid nahi (pure, SL ATR×' + (P.first_sl_atr != null ? P.first_sl_atr : st.first_sl_atr) + ')') + (P.tp_usd != null ? ', TP ' + (P.tp_usd ? '$' + P.tp_usd : 'off') : '') + '. Neeche default values; preset unhe badalta hai.');
+  L.push('Symbol <b>' + esc(st.symbol) + '</b>, lot <b>' + st.lot + '</b> (0.01 lot pe $1 move = $' + (0.01 * st.contract_size).toFixed(2) + ').');
+  L.push('<b>Trend:</b> ' + tr.tf + ' EMA ' + tr.ema_fast + ' vs EMA ' + tr.ema_slow + ' (closed bar). Upar = sirf BUY, neeche = sirf SELL. <b>Koi wait nahi</b> — basket band hote hi agle M1 bar pe turant nayi basket trend ki side.' + (st.entry.flip_close_reverse !== false ? ' Trend palta to sab close + nayi side.' : ''));
+  L.push('<b>Pyramid:</b> price favour mein har <b>$' + stepNow + '</b> pe naya trade (max ' + py.max_adds + ' add). Har add ke baad poore basket ka SL = last add − ' + (P.trail_gap_price != null ? '$' + P.trail_gap_price : py.trail_gap_price != null ? '$' + py.trail_gap_price : 'step') + '.');
+  L.push('<b>Pure (loss grid 0):</b> pehle trade ka SL = ATR(' + st.atr.tf + ', ' + st.atr.period + ') × ' + st.first_sl_atr + '. <b>Combo:</b> SL nahi; price ulta ATR × ' + lg.gap_atr + ' chale to same lot ka grid trade (preset jitne levels), grid khula ho to basket +$' + lg.recover_usd + ' pe close, basket −$' + lg.max_loss_usd + ' pe close.');
+  L.push('Basket TP <b>' + (b.tp_usd ? '$' + b.tp_usd : 'off') + '</b>. Daily target <b>+$' + d.target_usd + '</b> / loss <b>−$' + d.loss_usd + '</b> (day-start equity, ' + d.reset_time + ' ' + d.tz + ' reset).');
+  L.push('Friday ' + (f.friday_close && f.friday_close.enabled ? f.friday_close.server_time + ' server time pe sab close, Monday tak nayi basket nahi' : 'close off') + ' · news ' + (f.news && f.news.enabled ? 'on (backtest mein nahi)' : 'off') + '.');
+  L.push('<b>Presets:</b> ' + Object.entries(b.presets).map(([n, p]) => '<b>' + esc(n) + '</b> = ' + esc(pyrPresetText(p))).join(' · '));
+  return L;
+}
+const PYR_FORM_GROUPS = [
+  ['General', [['name', 'text', 'Naam'], ['symbol', 'text', 'Symbol'], ['lot', 'num', 'Lot'], ['contract_size', 'num', 'Contract size'], ['point', 'num', 'Point'], ['server_gmt_offset_hours', 'num', 'Server GMT offset']]],
+  ['Trend', [['trend.tf', 'sel', 'Timeframe', '', ['M15', 'M30', 'H1', 'H4']], ['trend.ema_fast', 'num', 'EMA fast'], ['trend.ema_slow', 'num', 'EMA slow'], ['entry.flip_close_reverse', 'bool', 'Trend palte to close + reverse']]],
+  ['Pyramid (default)', [['pyramid.step_price', 'num', 'Step ($)'], ['pyramid.max_adds', 'num', 'Max adds'], ['pyramid.trail_gap_price', 'numN', 'Trail gap ($)', 'Khaali = step'], ['first_sl_atr', 'num', 'Pehla SL (ATR ×)', 'Sirf pure (loss grid 0)'], ['atr.period', 'num', 'ATR period (M15)']]],
+  ['Loss grid (combo)', [['loss_grid.gap_atr', 'num', 'Gap (ATR ×)'], ['loss_grid.recover_usd', 'num', 'Recover close ($)'], ['loss_grid.max_loss_usd', 'num', 'Basket max loss ($)']]],
+  ['PYR_PRESET', []],
+  ['Basket + daily', [['basket.tp_usd', 'numN', 'Basket TP ($)', 'Khaali = off'], ['daily.target_usd', 'num', 'Daily target ($)', '0 = off'], ['daily.loss_usd', 'num', 'Daily loss ($)', '0 = off'], ['filters.max_spread_points', 'num', 'Max spread (pts)', '0 = off'], ['filters.friday_close.enabled', 'bool', 'Friday close'], ['filters.friday_close.server_time', 'time', 'Friday close (server)']]]
+];
+function pyrTable(r) {
+  const w = r.pyr, s = w.settings;
+  let h = '<tr><th>EXIT</th><th>BASKETS · P/L</th></tr>';
+  Object.entries(w.exits).sort((a, b) => b[1].n - a[1].n).forEach(([k, v]) => {
+    h += '<tr><td>' + (REASON_NAME[k] || k) + '</td><td>' + v.n + ' · <span class="' + signCls(v.pl) + '">' + money(v.pl) + '</span></td></tr>';
+  });
+  h += '<tr><th>BASKET KAISE BANI</th><th>GINTI</th></tr>';
+  Object.entries(w.adds).sort((a, b) => a[0] < b[0] ? -1 : 1).forEach(([k, v]) => { h += '<tr><td>' + esc(k.replace('adds', 'Pyramid adds').replace('grid', 'Loss grid')) + '</td><td>' + fmtInt(v) + '</td></tr>'; });
+  h += '<tr><th>SETTING</th><th>VALUE</th></tr><tr><td>Step / trail</td><td>$' + s.step + ' / $' + s.trailGap + '</td></tr>' +
+    '<tr><td>Loss grid</td><td>' + (s.levels ? s.levels + ' · ATR×' + s.gapAtr + ' · −$' + s.maxLoss : 'nahi · SL ATR×' + s.slAtr) + '</td></tr>' +
+    '<tr><td>Basket TP</td><td>' + (s.tpUsd ? '$' + s.tpUsd : 'off') + '</td></tr>';
+  return h;
+}
 function sweepTable(r) {
   const w = r.sweep, rows = [['Setups mile', w.setups], ['Trade liye', w.taken]].concat(Object.entries(w.veto).sort((a, b) => b[1] - a[1]).map(([k, v]) => ['Veto: ' + k, v]));
   let h = '<tr><th>GUARDIAN</th><th>GINTI</th></tr>' + rows.map(x => '<tr><td>' + esc(x[0]) + '</td><td>' + fmtInt(x[1]) + '</td></tr>').join('');
@@ -2297,6 +2588,7 @@ async function loadQuad(file) {
 function presetText(p) {
   if (p && p.modules) return quadPresetText(p);
   if (p && p.exec) return p.label || ('exec ' + p.exec);
+  if (p && p.loss_levels != null) return pyrPresetText(p);
   const parts = [];
   parts.push(p.tp_usd != null ? 'Basket +$' + p.tp_usd + ' pe sab close' : 'Fixed TP nahi');
   parts.push(p.sl_pct_balance != null ? 'SL = balance ka ' + p.sl_pct_balance + '%' : 'Basket SL nahi');
@@ -2307,6 +2599,7 @@ function presetText(p) {
 function summarize(st) {
   if (isQuad(st)) return summarizeQuad(st);
   if (isSweep(st)) return summarizeSweep(st);
+  if (isPyr(st)) return summarizePyr(st);
   const e = st.entry, g = st.grid, d = st.daily, b = st.basket, p = b.presets[b.preset];
   const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
   const L = [];
@@ -2370,6 +2663,7 @@ $('btnQuadC').onclick = () => loadQuad('quad-basket-set-c.json');
 $('btnStep10').onclick = () => loadQuad('step-basket-10.json');
 $('btnStep10f').onclick = () => loadQuad('step-basket-10-fixed.json');
 $('btnSweep').onclick = () => loadQuad('liquidity-sweep-qp.json');
+$('btnPyr').onclick = () => loadQuad('trend-pyramid.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -2439,7 +2733,7 @@ function renderForm() {
   if (!st) { F.innerHTML = ''; return; }
   const pk = st.basket && st.basket.preset, P = pk && st.basket.presets ? st.basket.presets[pk] : null;
   let h = '';
-  (isQuad(st) ? QUAD_FORM_GROUPS : isSweep(st) ? SWEEP_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
+  (isQuad(st) ? QUAD_FORM_GROUPS : isSweep(st) ? SWEEP_FORM_GROUPS : isPyr(st) ? PYR_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
     if (title === 'LOTS') {
       const lots = (st.lots || []).slice().sort((a, b) => a.from - b.from);
       h += '<div class="fgrp"><div class="lbl">Lot table</div><div class="hint muted" style="font-size:11px">Basket mein trade number → lot</div>';
@@ -2450,6 +2744,15 @@ function renderForm() {
         '<div class="field" style="margin-top:6px"><div><label>Auto-fill</label><div class="hint">Har N trade pe lot badhe</div></div><div style="display:flex;gap:4px;align-items:center">' +
         '<input id="afN" type="number" value="3" style="width:46px" title="N"><input id="afStart" type="number" step="0.01" value="0.01" style="width:60px" title="start"><input id="afInc" type="number" step="0.01" value="0.01" style="width:60px" title="+inc">' +
         '<button class="btn small" data-act="lotAuto" style="padding:6px 8px">Fill</button></div></div><div class="hint muted" style="font-size:11px">N · start lot · badhat (max trades tak)</div></div>';
+      return;
+    }
+    if (title === 'PYR_PRESET') {
+      if (!P) return;
+      h += '<div class="fgrp"><div class="lbl">Preset ' + esc(pk) + ' <span class="muted" style="letter-spacing:.05em;text-transform:none">(upar preset chuno · khaali = strategy ka default)</span></div>' +
+        fieldHtml('basket.presets.' + pk + '.step_price', 'numN', 'Pyramid step ($)', 'Profit side har itne $ pe add', null, P.step_price) +
+        fieldHtml('basket.presets.' + pk + '.trail_gap_price', 'numN', 'Trail gap ($)', 'Add ke baad SL = last add − gap · khaali = step', null, P.trail_gap_price) +
+        fieldHtml('basket.presets.' + pk + '.loss_levels', 'num', 'Loss grid levels', '0 = pure pyramid (SL ATR×)', null, P.loss_levels) +
+        fieldHtml('basket.presets.' + pk + '.tp_usd', 'numN', 'Basket TP ($)', 'Khaali = default · 0 = off', null, P.tp_usd) + '</div>';
       return;
     }
     if (title === 'PRESET') {
@@ -2517,8 +2820,8 @@ $('stForm').addEventListener('click', e => {
 
 /* ===================== RUN ===================== */
 const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case', qp: 'QP (M5 close)' };
-const REASON_NAME = { BE: 'Breakeven stop', TP2: 'TP2 (liquidity pool)', LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam' };
-const REASON_SHORT = { BE: 'BE', TP2: 'TP2', LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END' };
+const REASON_NAME = { BE: 'Breakeven stop', TP2: 'TP2 (liquidity pool)', LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam', MAX_LOSS: 'Basket max loss', RECOVER: 'Grid recover', FLIP: 'Trend palta', FRIDAY: 'Friday close' };
+const REASON_SHORT = { BE: 'BE', TP2: 'TP2', LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END', MAX_LOSS: 'MAXL', RECOVER: 'RECOV', FLIP: 'FLIP', FRIDAY: 'FRI' };
 const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
 const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
 const istStr = sec => fmtSec(serverToIst(sec, S.offset));
@@ -2622,13 +2925,15 @@ function renderRun(r) {
     ['Win rate', fmtNum(r.winRate, 1) + '%', wins + ' / ' + r.baskets.length + ' baskets'],
     ['Trades', fmtInt(trades), 'max ' + r.maxTradesInBasket + ' ek basket mein'],
     ['Avg basket', money(r.baskets.length ? r.net / r.baskets.length : 0), 'per basket'],
-    ['Target days', fmtInt(r.dayTarget), 'daily +' + S.strategy.daily.target_pct + '% hit'],
-    ['Loss days', fmtInt(r.dayLoss), 'daily −' + S.strategy.daily.loss_pct + '% hit']
+    ['Target days', fmtInt(r.dayTarget), 'daily +' + dailyLbl(S.strategy.daily, 'target') + ' hit'],
+    ['Loss days', fmtInt(r.dayLoss), 'daily −' + dailyLbl(S.strategy.daily, 'loss') + ' hit']
   ];
   if (r.quad) stats.splice(4, 0, ['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake']);
   if (r.sweep) stats.splice(6, 2, ['Trades / din', fmtNum(r.sweep.tradesPerDay, 2), r.sweep.setups + ' setups, ' + r.sweep.taken + ' liye'], ['TP1 hit', fmtInt(r.sweep.tp1Hits), '50% band + BE']);
-  $('rModCard').classList.toggle('hide', !r.quad && !r.sweep);
-  $('rModCard').querySelector('.lbl').textContent = r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  if (r.pyr) stats.splice(5, 1, ['Trades / din', fmtNum(r.pyr.tradesPerDay, 1), 'pyramid adds + grid milake']);
+  $('rModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr);
+  $('rModCard').querySelector('.lbl').textContent = r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  if (r.pyr) $('rMods').innerHTML = pyrTable(r);
   if (r.quad) $('rMods').innerHTML = modTable(r);
   if (r.sweep) $('rMods').innerHTML = sweepTable(r);
   $('rStats').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
@@ -2702,8 +3007,8 @@ function repStatsList(r, rep, st) {
     ['Days', s.greenDays + ' / ' + s.redDays, 'green / red · avg ' + money(s.avgDay)],
     ['Best day', s.bestDay ? money(s.bestDay.pl) : '—', s.bestDay ? s.bestDay.date : ''],
     ['Worst day', s.worstDay ? money(s.worstDay.pl) : '—', s.worstDay ? s.worstDay.date : ''],
-    ['Target days', fmtInt(r.dayTarget), 'daily +' + d.target_pct + '%'],
-    ['Loss days', fmtInt(r.dayLoss), 'daily −' + d.loss_pct + '%']
+    ['Target days', fmtInt(r.dayTarget), 'daily +' + dailyLbl(d, 'target')],
+    ['Loss days', fmtInt(r.dayLoss), 'daily −' + dailyLbl(d, 'loss')]
   ].concat(r.quad ? [['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake'], ['Peak stops', fmtInt(r.quad.peakStops), 'peak se DD limit']] : []);
 }
 
@@ -2715,8 +3020,9 @@ function renderReport() {
   $('repTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
   $('repNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + pctS(r.netPct) + ')</span>';
   $('repMeta').textContent = fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' (server)\nbalance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset + (r.ranAt ? ' · run ' + istNow(r.ranAt) + ' IST' : '');
-  $('repModCard').classList.toggle('hide', !r.quad && !r.sweep);
-  $('repModCard').querySelector('.lbl').textContent = r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  $('repModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr);
+  $('repModCard').querySelector('.lbl').textContent = r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  if (r.pyr) $('repMods').innerHTML = pyrTable(r);
   if (r.quad) $('repMods').innerHTML = modTable(r);
   if (r.sweep) $('repMods').innerHTML = sweepTable(r);
   $('repStats').innerHTML = repStatsList(r, rep, st).map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
@@ -2877,11 +3183,12 @@ function buildHtmlReport(r, rep, st) {
     '<div class="big">' + money(r.net) + ' <span style="font-size:18px;color:#8f887a">(' + pctS(r.netPct) + ')</span></div>' +
     '<div class="m">' + fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' server · balance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset +
     ' · generated ' + istNow(Date.now()) + ' IST</div>' +
-    '<p class="m">' + (r.sweep ? (r.sweep.exec === 'qp' ? 'Model: QUANT PILOT ka apna backtester — M5 close pe fill, spread 0, candle mein SL pehle. Rules: docs/SWEEP-RULES.md.' : 'Model: M5 signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste (' + PATH_NAME[r.opt.path] + ') pe SL/BE/TP1/TP2, trailing M5 close pe. Slippage/swap nahi. Rules: docs/SWEEP-RULES.md.') : 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.') + '</p>' +
+    '<p class="m">' + (r.pyr ? 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', CSV spread, exact level fills. Trailing tight ho (step $2–3) to M1 raasta result badal deta hai — Worst-case bhi dekho. Rules: docs/PYRAMID-RULES.md.' : r.sweep ? (r.sweep.exec === 'qp' ? 'Model: QUANT PILOT ka apna backtester — M5 close pe fill, spread 0, candle mein SL pehle. Rules: docs/SWEEP-RULES.md.' : 'Model: M5 signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste (' + PATH_NAME[r.opt.path] + ') pe SL/BE/TP1/TP2, trailing M5 close pe. Slippage/swap nahi. Rules: docs/SWEEP-RULES.md.') : 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.') + '</p>' +
     '<h2>Summary</h2><div class="grid">' + stats + '</div>' +
     '<h2>Equity</h2><div class="box">' + svgLine(r.eqClose, 900, 220, '#d4af37', r.startBal) + '</div>' +
     '<h2>Drawdown %</h2><div class="box">' + svgLine(Array.from(ddSeries(r), v => -v), 900, 110, '#ff5d5d', 0, v => fmtNum(Math.abs(v), 1) + '%') + '</div>' +
     '<h2>Close reasons</h2><div>' + reasons + '</div>' +
+    (r.pyr ? '<h2>Exits + adds (Trend Pyramid)</h2><div class="box"><table>' + pyrTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' : '') +
     (r.sweep ? '<h2>Guardian + exits (Liquidity Sweep)</h2><div class="box"><table>' + sweepTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' +
       '<h2>Sweep trades (level · confidence)</h2><div class="box">' + T(['OPEN IST', 'DIR', 'LEVEL', 'CONF', 'LOT', 'ENTRY', 'EXIT', 'P/L', 'REASON'],
         r.trades.slice().sort((a, b) => a.ot - b.ot).map(t => '<tr>' + td(istStr(t.ot)) + td(t.dir > 0 ? 'BUY' : 'SELL') + td(esc(t.lvl)) + td(t.conf + '/10') + td(t.lot.toFixed(2)) + td(t.op.toFixed(3)) + td(t.cp.toFixed(3)) + td(money(t.pr), cls(t.pr)) + td(REASON_SHORT[t.r] || t.r) + '</tr>')) + '</div>' : '') +
