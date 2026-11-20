@@ -15,9 +15,10 @@ Owner works only from an Android phone (GitHub web + Chrome). Read STATE.md firs
 
 ## Engine
 - Rules in docs/ENGINE-RULES.md; the Universal EA must follow the same rules.
-- Run `node tests/engine.test.js`, `node tests/quad.test.js`, `node tests/sweep.test.js` `node tests/pyramid.test.js` and `node tests/pyramid-ea.test.js` before every push.
+- Run `node tests/engine.test.js`, `node tests/quad.test.js`, `node tests/sweep.test.js` `node tests/pyramid.test.js`, `node tests/pyramid-ea.test.js` and `node tests/lastcandle.test.js` before every push.
 - Every EA/strategy backtest is done in this Lab (owner rule, 19 Nov 2026). Trend Pyramid rules: docs/PYRAMID-RULES.md.
 - QUAD portfolio rules: docs/QUAD-RULES.md.
+- AMC Last Candle rules: docs/LASTCANDLE-RULES.md (same as samusignal vps-ea AMC Last Candle EA).
 
 ## EA standard
 - Full-screen "Gold Luxe" dashboard; EA file name = full name + version (e.g. "SAMU Universal EA v1.00.mq5").

@@ -1,5 +1,5 @@
 /* SAMU Backtest Lab service worker — offline cache */
-const VERSION = 'v0.8.1';
+const VERSION = 'v0.9.0';
 const CACHE = 'samu-lab-' + VERSION;
 const ASSETS = [
   './',
@@ -14,6 +14,7 @@ const ASSETS = [
   './strategies/liquidity-sweep-qp.json',
   './strategies/trend-pyramid.json',
   './strategies/trend-pyramid-10k.json',
+  './strategies/amc-last-candle.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

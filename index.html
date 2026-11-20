@@ -123,7 +123,7 @@ section.scr.on{display:block}
   <div class="wrap hrow">
     <div class="brand">
       <div class="lbl">SAMU</div>
-      <h1>Backtest Lab<small id="appVer">v0.8.1</small></h1>
+      <h1>Backtest Lab<small id="appVer">v0.9.0</small></h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
     <button id="btnRefresh" class="btn small" title="Refresh: latest version laao" aria-label="Refresh" style="padding:6px 10px;font-size:16px;letter-spacing:0;line-height:1">⟳</button>
@@ -229,6 +229,7 @@ section.scr.on{display:block}
       <button class="btn small" id="btnSweep">Liquidity Sweep (QUANT PILOT)</button>
       <button class="btn small" id="btnPyr">Trend Pyramid</button>
       <button class="btn small" id="btnPyr10k">Trend Pyramid $10k (0.03)</button>
+      <button class="btn small" id="btnLC">AMC Last Candle</button>
       <button class="btn small" id="btnUploadJson">JSON upload</button>
       <button class="btn small" id="btnDownloadJson">JSON download</button>
     </div>
@@ -495,6 +496,7 @@ var SamuEngine = (function () {
     if (st && st.schema === 'samu-strategy/2') return runQuad(ds, st, opt);
     if (st && st.schema === 'samu-strategy/3') return runSweep(ds, st, opt);
     if (st && st.schema === 'samu-strategy/4') return runPyramid(ds, st, opt);
+    if (st && st.schema === 'samu-strategy/5') return runLastCandle(ds, st, opt);
     opt = opt || {};
     var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s;
     var N = T.length;
@@ -1755,6 +1757,224 @@ var SamuEngine = (function () {
     return r;
   }
 
+  /* ---------- AMC LAST CANDLE engine (schema samu-strategy/5) ----------
+     Rules: docs/LASTCANDLE-RULES.md (= samusignal vps-ea "AMC Last Candle" EA).
+     Naye candle ke open pe pichhli band candle ka rang: GREEN = BUY, RED = SELL, doji = skip.
+     Har trade ka alag TP ($). Ek side ki avg_after single trades khuli ho aur usi side ka naya
+     trade aaye to wo sab ek AVG group: common TP = weighted avg price + avg_tp_usd. */
+  function runLastCandle(ds, st, opt) {
+    opt = opt || {};
+    var T = ds.t, O = ds.o, H = ds.h, L = ds.l, C = ds.c, SP = ds.s, N = T.length;
+    var cs = st.contract_size, point = opt.point || st.point;
+    var off = (opt.offset != null ? opt.offset : st.server_gmt_offset_hours) || 0;
+    var b0 = st.basket || {}, presetKey = opt.preset || b0.preset, PR = (b0.presets && b0.presets[presetKey]) || {};
+    var lc = st.last_candle || {}, lim = st.limits || {};
+    var pv = function (k, def) { return PR[k] != null ? PR[k] : def; };
+    var lot = pv('lot', st.lot || 0.01);
+    var tpUsd = pv('tp_usd', lc.tp_usd), avgAfter = pv('avg_after', lc.avg_after || 0), avgTp = pv('avg_tp_usd', lc.avg_tp_usd);
+    var maxT = pv('max_trades', lim.max_trades || 0), maxSide = pv('max_per_side', lim.max_per_side || 0);
+    var minBody = (lc.min_body_points || 0) * point;
+    var tfs = TF[lc.tf || 'M1']; if (!tfs) throw new Error('last_candle.tf galat');
+    var d = st.daily || {}, dTgt = pv('target_pct', d.target_pct || 0), dLoss = pv('loss_pct', d.loss_pct || 0);
+    var closeOnTgt = d.target_close_all !== false;
+    var rp = (d.reset_time || '07:00').split(':'), resetSec = (+rp[0]) * 3600 + (+rp[1]) * 60;
+    var comm = (st.costs && st.costs.commission_per_lot) || 0;
+    var f = st.filters || {}, maxSpPts = opt.maxSpreadPts != null ? opt.maxSpreadPts : (f.max_spread_points || 0);
+    var fs = f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time.split(':') : null;
+    var friMin = fs ? (+fs[0]) * 60 + (+fs[1]) : 0, monMin = fs ? (f.friday_stop.monday_from ? (+f.friday_stop.monday_from.split(':')[0]) * 60 + (+f.friday_stop.monday_from.split(':')[1]) : 210) : 0;
+    var baseUsd = (opt.pnl || st.pnl) === 'base_usd';      // USDJPY / USDCHF / USDCAD: profit quote me, /price = USD
+    var pathMode = opt.path || 'auto';
+    var spreadFixed = opt.spreadMode === 'fixed' || !SP;
+    var fixedPts = opt.fixedPts != null ? opt.fixedPts : 10, fixedSpr = fixedPts * point;
+    if (!(tpUsd > 0)) throw new Error('last_candle.tp_usd > 0 chahiye');
+    if (avgAfter > 0 && !(avgTp > 0)) throw new Error('avg_after on hai to avg_tp_usd > 0 chahiye');
+    if (!(lot > 0)) throw new Error('lot > 0 chahiye');
+
+    var i0 = 0, i1 = N - 1;
+    if (opt.from != null) while (i0 < N && T[i0] < opt.from) i0++;
+    if (opt.to != null) while (i1 >= 0 && T[i1] >= opt.to) i1--;
+    if (i1 < i0) throw new Error('Is date range mein data nahi hai');
+    var n1 = i1 - i0 + 1;
+    var startBal = opt.balance || 10000;
+    var trades = [], baskets = [], dayStops = [], days = [];
+    var eqClose = new Float64Array(n1), eqLow = new Float64Array(n1), barT = new Float64Array(n1);
+    var S = { bal: startBal, pos: [], A: 0, K: 0, k: 1, nextTid: 1, bId: 0, gId: 0, dayKey: null, dayStartEq: startBal, dayStartBal: startBal,
+      dayStopped: false, dayReason: '', eqMin: Infinity, ev: [], maxN: 0, maxB: 0, maxS: 0, maxGrp: 0, groups: 0,
+      sk: { doji: 0, spread: 0, max: 0, side: 0, weekend: 0, day: 0 }, opened: 0 };
+    function clone(s) {
+      var c = {}; for (var k in s) c[k] = s[k];
+      c.pos = s.pos.map(function (p) { return { id: p.id, dir: p.dir, lot: p.lot, op: p.op, ot: p.ot, tp: p.tp, g: p.g, mn: p.mn }; });
+      c.sk = {}; for (var q in s.sk) c.sk[q] = s.sk[q];
+      c.ev = []; return c;
+    }
+    function recalc(s, spr) {
+      var A = 0, K = 0;
+      for (var i = 0; i < s.pos.length; i++) {
+        var p = s.pos[i], v = p.lot * cs * s.k;
+        if (p.dir === 1) { A += v; K -= p.op * v; } else { A -= v; K += (p.op - spr) * v; }
+        K -= comm * p.lot;
+      }
+      s.A = A; s.K = K;
+    }
+    function PL(s, p) { return s.pos.length ? s.A * p + s.K : 0; }
+    function posPL(s, q, p, spr) { return q.dir * ((q.dir === 1 ? p : p + spr) - q.op) * q.lot * cs * s.k - comm * q.lot; }
+    function trig(q, spr) { return q.dir === 1 ? q.tp : q.tp - spr; }      // bid level jahan TP lagta hai
+    function hit(q, p, spr) { return q.dir === 1 ? p >= q.tp - EPS : p + spr <= q.tp + EPS; }
+    function closeList(s, list, p, spr, t, reason) {
+      if (!list.length) return;
+      var tot = 0, ot = Infinity, mn = 0, ids = {};
+      for (var i = 0; i < list.length; i++) {
+        var q = list[i], cp = q.dir === 1 ? p : p + spr, pr = posPL(s, q, p, spr);
+        tot += pr; if (q.ot < ot) ot = q.ot; mn += q.mn; ids[q.id] = 1;
+        s.ev.push({ k: 'T', id: q.id, b: s.bId + 1, dir: q.dir, lot: q.lot, ot: q.ot, op: q.op, ct: t, cp: cp, pr: pr, r: reason, kind: q.g ? 'AVG#' + q.g : 'SINGLE' });
+      }
+      s.bId++; s.bal += tot;
+      s.ev.push({ k: 'B', id: s.bId, dir: list[0].dir, ot: ot, ct: t, n: list.length, pr: tot, r: reason, minPL: mn, peakPL: tot, startBal: s.bal - tot, grp: list[0].g || 0 });
+      s.pos = s.pos.filter(function (q) { return !ids[q.id]; });
+      recalc(s, spr);
+    }
+    function stopDay(s, p, spr, t, reason, flat) {
+      if (flat && s.pos.length) closeList(s, s.pos.slice(), p, spr, t, reason);
+      s.dayStopped = true; s.dayReason = reason;
+      s.ev.push({ k: 'D', t: t, r: reason, day: s.dayKey });
+    }
+    function trackEq(s, p, spr) {
+      var eq = s.bal + PL(s, p);
+      if (eq < s.eqMin) s.eqMin = eq;
+      for (var i = 0; i < s.pos.length; i++) { var x = posPL(s, s.pos[i], p, spr); if (x < s.pos[i].mn) s.pos[i].mn = x; }
+    }
+    // check order: daily loss → daily target → TP (single / AVG group)
+    function checkAt(s, p, spr, t) {
+      for (var guard = 0; guard < 200; guard++) {
+        trackEq(s, p, spr);
+        var eq = s.bal + PL(s, p), today = eq - s.dayStartEq;
+        var tgtAmt = s.dayStartBal * dTgt / 100, lossAmt = s.dayStartBal * dLoss / 100;
+        if (dLoss && s.dayReason !== 'DAY_LOSS' && today <= -lossAmt + EPS && (s.pos.length || !s.dayStopped)) { stopDay(s, p, spr, t, 'DAY_LOSS', true); continue; }
+        if (dTgt && !s.dayStopped && today >= tgtAmt - EPS) { stopDay(s, p, spr, t, 'DAY_TARGET', closeOnTgt); continue; }
+        if (!s.pos.length) return;
+        var hitG = 0, single = [];
+        for (var i = 0; i < s.pos.length; i++) { var q = s.pos[i]; if (hit(q, p, spr)) { if (q.g) { hitG = q.g; break; } single.push(q); } }
+        if (hitG) { closeList(s, s.pos.filter(function (q) { return q.g === hitG; }), p, spr, t, 'AVG_TP'); continue; }
+        if (single.length) { for (var j = 0; j < single.length; j++) closeList(s, [single[j]], p, spr, t, 'SINGLE_TP'); continue; }
+        return;
+      }
+    }
+    function walk(s, a, b, spr, t) {
+      for (var guard = 0; guard < 2000; guard++) {
+        checkAt(s, a, spr, t);
+        if (Math.abs(b - a) < 1e-12) return;
+        var up = b > a, best = b;
+        var cand = function (x) { if (up ? (x > a + 1e-12 && x < best) : (x < a - 1e-12 && x > best)) best = x; };
+        for (var i = 0; i < s.pos.length; i++) cand(trig(s.pos[i], spr));
+        if (s.pos.length && s.A !== 0) {
+          var plT = function (v) { cand((v - s.K) / s.A); };
+          var base = s.dayStartEq - s.bal;
+          if (dLoss && s.dayReason !== 'DAY_LOSS') plT(base - s.dayStartBal * dLoss / 100);
+          if (dTgt && !s.dayStopped) plT(base + s.dayStartBal * dTgt / 100);
+        }
+        trackEq(s, best, spr);
+        a = best;
+      }
+    }
+    function blockedWeekend(t) {        // IST: Friday friday_stop.time ke baad, Sat, Sun, Monday monday_from se pehle
+      if (!fs) return false;
+      var x = t - off * 3600 + IST, dw = new Date(x * 1000).getUTCDay(), m = Math.floor(((x % 86400) + 86400) % 86400 / 60);
+      return (dw === 5 && m >= friMin) || dw === 6 || dw === 0 || (dw === 1 && m < monMin);
+    }
+    function formGroup(s, dir, spr) {
+      var mem = s.pos.filter(function (q) { return q.dir === dir && !q.g; });
+      if (!(avgAfter > 0) || mem.length < avgAfter) return false;
+      var g = ++s.gId, sl = 0, slp = 0;
+      mem.forEach(function (q) { sl += q.lot; slp += q.lot * q.op; });
+      var avg = slp / sl, dist = (avgTp + comm * sl) / (sl * cs * s.k);
+      // sell: op = bid pe khula, band ask pe -> avg (bid) - dist = ask level
+      var tp = dir === 1 ? avg + dist : avg - dist;
+      mem.forEach(function (q) { q.g = g; q.tp = tp; });
+      s.groups++; if (mem.length > s.maxGrp) s.maxGrp = mem.length;
+      return true;
+    }
+    function simBar(s, pts, spr, t, sig, spPts, wk) {
+      s.eqMin = Infinity;
+      checkAt(s, pts[0], spr, t);
+      if (sig !== null) {
+        var nb = 0, ns = 0; s.pos.forEach(function (q) { if (q.dir === 1) nb++; else ns++; });
+        if (sig === 0) s.sk.doji++;
+        else if (s.dayStopped) s.sk.day++;
+        else if (wk) s.sk.weekend++;
+        else if (maxSpPts && spPts > maxSpPts) s.sk.spread++;
+        else if (maxT && nb + ns >= maxT) s.sk.max++;
+        else if (maxSide && (sig === 1 ? nb : ns) >= maxSide) s.sk.side++;
+        else {
+          formGroup(s, sig, spr);
+          var bid = pts[0], op = sig === 1 ? bid + spr : bid, dist = (tpUsd + comm * lot) / (lot * cs * s.k);
+          s.pos.push({ id: s.nextTid++, dir: sig, lot: lot, op: op, ot: t, tp: sig === 1 ? op + dist : op - dist, g: 0, mn: 0 });
+          s.opened++;
+          if (sig === 1) nb++; else ns++;
+          if (s.pos.length > s.maxN) s.maxN = s.pos.length; if (nb > s.maxB) s.maxB = nb; if (ns > s.maxS) s.maxS = ns;
+          recalc(s, spr);
+          checkAt(s, pts[0], spr, t);
+        }
+      }
+      for (var k = 1; k < pts.length; k++) walk(s, pts[k - 1], pts[k], spr, t);
+    }
+    function flush(s) {
+      for (var i = 0; i < s.ev.length; i++) {
+        var e = s.ev[i];
+        if (e.k === 'T') trades.push(e); else if (e.k === 'B') { e.maxN = e.n; baskets.push(e); } else dayStops.push(e);
+      }
+      s.ev = [];
+    }
+    var curDay = null, lastB = null, bO = NaN, bC = NaN;
+    for (var i = i0; i <= i1; i++) {
+      var t = T[i], spPts = spreadFixed ? fixedPts : SP[i], spr = spreadFixed ? fixedSpr : SP[i] * point;
+      S.k = baseUsd ? 1 / O[i] : 1;
+      if (S.pos.length) recalc(S, spr);
+      var dk = Math.floor((t - off * 3600 + IST - resetSec) / 86400);
+      if (dk !== S.dayKey) {
+        if (curDay) { curDay.endEq = eqClose[i - i0 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+        S.dayKey = dk; S.dayStartEq = S.bal + PL(S, O[i]); S.dayStartBal = S.bal; S.dayStopped = false; S.dayReason = '';
+        curDay = { key: dk, startEq: S.dayStartEq, startT: t };
+      }
+      // naya candle (tf bucket) shuru: pichhli candle ka rang = signal. Sirf bucket ke pehle M1 bar pe (EA: 30 sec window)
+      var bk = Math.floor(t / tfs) * tfs, sig = null;
+      if (bk !== lastB) {
+        if (lastB !== null && t === bk && !isNaN(bO)) { var body = bC - bO; sig = (Math.abs(body) <= minBody + 1e-12 || body === 0) ? 0 : body > 0 ? 1 : -1; }
+        if (opt.forceSignals && opt.forceSignals[t] != null) sig = opt.forceSignals[t];
+        lastB = bk; bO = O[i];
+      }
+      var wk = blockedWeekend(t);
+      var pOLHC = [O[i], L[i], H[i], C[i]], pOHLC = [O[i], H[i], L[i], C[i]];
+      if (pathMode === 'worst') {
+        var s1 = clone(S), s2 = clone(S);
+        simBar(s1, pOLHC, spr, t, sig, spPts, wk); simBar(s2, pOHLC, spr, t, sig, spPts, wk);
+        var e1 = s1.bal + PL(s1, C[i]), e2 = s2.bal + PL(s2, C[i]);
+        S = (e1 < e2 - 1e-9 || (Math.abs(e1 - e2) <= 1e-9 && s1.eqMin <= s2.eqMin)) ? s1 : s2;
+      } else {
+        simBar(S, pathMode === 'olhc' ? pOLHC : pathMode === 'ohlc' ? pOHLC : (C[i] >= O[i] ? pOLHC : pOHLC), spr, t, sig, spPts, wk);
+      }
+      bC = C[i];
+      flush(S);
+      var j = i - i0;
+      barT[j] = t; eqClose[j] = S.bal + PL(S, C[i]); eqLow[j] = Math.min(S.eqMin, eqClose[j]);
+      if (opt.onProgress && (j & 16383) === 0) opt.onProgress(j / n1);
+    }
+    if (S.pos.length) { var sE = spreadFixed ? fixedSpr : SP[i1] * point; closeList(S, S.pos.slice(), C[i1], sE, T[i1], 'END'); flush(S); eqClose[n1 - 1] = S.bal; }
+    if (curDay) { curDay.endEq = eqClose[n1 - 1]; curDay.endBal = S.bal; days.push(curDay); }
+    var r = summarize({
+      startBal: startBal, endBal: S.bal, trades: trades, baskets: baskets, dayStops: dayStops, days: days,
+      eqClose: eqClose, eqLow: eqLow, barT: barT,
+      opt: { preset: presetKey, path: pathMode, spread: spreadFixed ? 'fixed ' + fixedPts + ' pts' : 'CSV', balance: startBal, offset: off, resetSec: resetSec },
+      strategyName: st.name, from: T[i0], to: T[i1]
+    });
+    var exits = {};
+    baskets.forEach(function (b) { var e = exits[b.r] || (exits[b.r] = { n: 0, trades: 0, pl: 0 }); e.n++; e.trades += b.n; e.pl += b.pr; });
+    var tw = 0; trades.forEach(function (x) { if (x.pr > 0) tw++; });
+    r.lc = { exits: exits, groups: S.groups, maxGroup: S.maxGrp, maxOpen: S.maxN, maxBuy: S.maxB, maxSell: S.maxS, opened: S.opened, skips: S.sk,
+      tradeWin: trades.length ? tw / trades.length * 100 : 0, tradesPerDay: days.length ? trades.length / days.length : 0,
+      settings: { lot: lot, tf: lc.tf || 'M1', tpUsd: tpUsd, avgAfter: avgAfter, avgTp: avgTp, maxT: maxT, maxSide: maxSide, tgt: dTgt, loss: dLoss, maxSpPts: maxSpPts, pnl: baseUsd ? 'base_usd' : 'quote_usd' } };
+    return r;
+  }
+
   function summarize(r) {
     var peak = r.startBal, mdd = 0, mddPct = 0;
     for (var i = 0; i < r.eqClose.length; i++) {
@@ -1855,13 +2075,13 @@ var SamuEngine = (function () {
     };
   }
 
-  return { run: run, runQuad: runQuad, runSweep: runSweep, runPyramid: runPyramid, mapLevels: mapLevels, detectAt: detectAt, sweepScore: sweepScore, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
+  return { run: run, runQuad: runQuad, runSweep: runSweep, runPyramid: runPyramid, runLastCandle: runLastCandle, mapLevels: mapLevels, detectAt: detectAt, sweepScore: sweepScore, report: report, snapshot: snapshot, supertrend: supertrend, atr: atr, ema: ema, bands: bands, resample: resample, TF: TF };
 })();
 if (typeof module !== 'undefined') module.exports = SamuEngine;
 </script>
 <script>
 'use strict';
-const APP_VERSION = 'v0.8.1';
+const APP_VERSION = 'v0.9.0';
 const IST_OFFSET_SEC = 19800;      // +5:30
 const DAY_RESET_SEC  = 7 * 3600;   // 07:00 IST
 
@@ -2338,6 +2558,7 @@ function validateStrategy(st) {
   if (st.schema === 'samu-strategy/2') return validateQuad(st);
   if (st.schema === 'samu-strategy/3') return validateSweep(st);
   if (st.schema === 'samu-strategy/4') return validatePyr(st);
+  if (st.schema === 'samu-strategy/5') return validateLC(st);
   need(st.schema === 'samu-strategy/1', 'schema "samu-strategy/1" hona chahiye');
   need(typeof st.name === 'string' && st.name, 'name missing');
   need(pos(st.contract_size), 'contract_size > 0 chahiye');
@@ -2564,6 +2785,70 @@ const QUAD_FORM_GROUPS = [
   ['EA-4 BREAKOUT', [['modules.breakout.enabled', 'bool', 'Chalu'], ['modules.breakout.lot', 'num', 'Lot'], ['modules.breakout.sl_price', 'num', 'SL ($)'], ['modules.breakout.tf', 'sel', 'Range timeframe', '', QTF], ['modules.breakout.min_range_price', 'num', 'Min range ($)'], ['modules.breakout.from', 'time', 'From (IST)'], ['modules.breakout.to', 'time', 'To (IST)'], ['modules.breakout.day_loss_cap_usd', 'numN', 'Din ka loss cap ($)']]],
   ['Filters', [['filters.max_spread_points', 'num', 'Max spread (points)', '0 = off · sirf nayi entry'], ['filters.atr.high_price', 'numN', 'ATR tez market ($)', 'Khaali = off'], ['filters.friday_stop.enabled', 'bool', 'Friday stop'], ['filters.friday_stop.time', 'time', 'Friday stop (IST)'], ['costs.commission_per_lot', 'num', 'Commission $/lot']]]
 ];
+/* ---------- AMC LAST CANDLE (samu-strategy/5) ---------- */
+const isLC = st => !!st && st.schema === 'samu-strategy/5';
+function validateLC(st) {
+  const err = [], warn = [], need = (c, m) => { if (!c) err.push(m); }, pos = v => typeof v === 'number' && v > 0;
+  need(typeof st.name === 'string' && st.name, 'name missing');
+  need(pos(st.contract_size), 'contract_size > 0 chahiye');
+  need(pos(st.point), 'point > 0 chahiye');
+  need(typeof st.server_gmt_offset_hours === 'number', 'server_gmt_offset_hours number chahiye');
+  need(pos(st.lot), 'lot > 0');
+  const lc = st.last_candle || {}, lim = st.limits || {}, b = st.basket || {}, d = st.daily || {};
+  need(QTF.includes(lc.tf), 'last_candle.tf M1/M5/M15/M30/H1/H4/D1');
+  need(pos(lc.tp_usd), 'last_candle.tp_usd > 0');
+  need(Number.isInteger(lc.avg_after) && lc.avg_after >= 0, 'last_candle.avg_after integer ≥ 0 (0 = AVG band)');
+  if (lc.avg_after > 0) need(pos(lc.avg_tp_usd), 'last_candle.avg_tp_usd > 0');
+  need(Number.isInteger(lim.max_trades) && lim.max_trades >= 0 && Number.isInteger(lim.max_per_side) && lim.max_per_side >= 0, 'limits.max_trades / max_per_side integer ≥ 0');
+  need(b.presets && b.presets[b.preset], 'basket.preset "' + b.preset + '" presets mein nahi hai');
+  need(typeof d.target_pct === 'number' && typeof d.loss_pct === 'number', 'daily.target_pct / loss_pct number chahiye');
+  need(['quote_usd', 'base_usd', undefined].includes(st.pnl), 'pnl "quote_usd" (EURUSD, XAUUSD) ya "base_usd" (USDJPY…)');
+  if (st.filters && st.filters.news && st.filters.news.enabled) warn.push('News filter backtest mein nahi chalta (sirf live EA mein)');
+  warn.push('Swap backtest mein nahi hai — atki trades raat bhar rehti hain, asli account pe swap se loss thoda aur badhega.');
+  return { err, warn };
+}
+function lcPresetText(p) {
+  const x = [];
+  if (p.avg_after != null) x.push(p.avg_after ? 'AVG ' + p.avg_after + ' ke baad' : 'AVG band');
+  if (p.tp_usd != null) x.push('TP $' + p.tp_usd);
+  if (p.avg_tp_usd != null) x.push('AVG TP $' + p.avg_tp_usd);
+  return (p.label || '') + (x.length ? ' (' + x.join(', ') + ')' : '');
+}
+function summarizeLC(st) {
+  const lc = st.last_candle, lim = st.limits, b = st.basket, d = st.daily, f = st.filters || {}, L = [];
+  L.push('Symbol <b>' + esc(st.symbol) + '</b>, lot <b>' + st.lot + '</b>, contract ' + st.contract_size + (st.pnl === 'base_usd' ? ' (USD base pair: profit ÷ price)' : '') + '.');
+  L.push('<b>Entry:</b> har naye ' + lc.tf + ' candle ke open pe pichhli band candle dekho — <b>GREEN = BUY, RED = SELL</b>, doji' + (lc.min_body_points ? ' (body ≤ ' + lc.min_body_points + ' pts)' : '') + ' = skip. Ek candle = ek trade.');
+  L.push('<b>TP:</b> har trade ka alag <b>$' + lc.tp_usd + '</b>.' + (lc.avg_after ? ' Ek side ki <b>' + lc.avg_after + '</b> single trades khuli ho aur usi side ka naya trade aaye to pehle wali sab ek <b>AVG group</b> — common TP = average price + $' + lc.avg_tp_usd + ' (poore group ka). Naya trade phir alag $' + lc.tp_usd + ' TP se.' : ' AVG group band.'));
+  L.push('Max <b>' + lim.max_trades + '</b> khuli trades, ek side max <b>' + lim.max_per_side + '</b>. Koi SL nahi.');
+  L.push('Daily target <b>+' + d.target_pct + '%</b> of balance' + (d.target_close_all !== false ? ' (hit = sab band + din band)' : ' (hit = nayi trade band)') + ' · daily loss <b>−' + d.loss_pct + '%</b> (sab band) · reset ' + d.reset_time + ' ' + d.tz + '.');
+  L.push('Spread max ' + (f.max_spread_points || 'off') + ' pts · Friday ' + (f.friday_stop && f.friday_stop.enabled ? f.friday_stop.time + ' IST se Monday ' + (f.friday_stop.monday_from || '03:30') + ' IST tak nayi trade nahi' : 'stop off') + ' · news ' + (f.news && f.news.enabled ? 'on (backtest mein nahi)' : 'off') + '.');
+  L.push('<b>Presets:</b> ' + Object.entries(b.presets).map(([n, p]) => '<b>' + esc(n) + '</b> = ' + esc(lcPresetText(p))).join(' · '));
+  return L;
+}
+const LC_FORM_GROUPS = [
+  ['General', [['name', 'text', 'Naam'], ['symbol', 'text', 'Symbol'], ['lot', 'num', 'Lot'], ['contract_size', 'num', 'Contract size'], ['point', 'num', 'Point'], ['pnl', 'sel', 'Profit currency', 'USDJPY jaise = base_usd', ['quote_usd', 'base_usd']], ['server_gmt_offset_hours', 'num', 'Server GMT offset']]],
+  ['Last candle', [['last_candle.tf', 'sel', 'Candle timeframe', '', QTF], ['last_candle.tp_usd', 'num', 'Har trade TP ($)'], ['last_candle.avg_after', 'num', 'AVG kitni trade ke baad', '0 = AVG band'], ['last_candle.avg_tp_usd', 'num', 'AVG group TP ($)'], ['last_candle.min_body_points', 'num', 'Doji body (pts)', '0 = sirf open = close']]],
+  ['Limits', [['limits.max_trades', 'num', 'Max trades', '0 = off'], ['limits.max_per_side', 'num', 'Max ek side', '0 = off']]],
+  ['Daily + filters', [['daily.target_pct', 'num', 'Daily target (%)', '0 = off'], ['daily.target_close_all', 'bool', 'Target pe sab band'], ['daily.loss_pct', 'num', 'Daily loss (%)', '0 = off'], ['filters.max_spread_points', 'num', 'Max spread (pts)', '0 = off'], ['filters.friday_stop.enabled', 'bool', 'Friday / weekend stop'], ['filters.friday_stop.time', 'time', 'Friday stop (IST)']]]
+];
+function lcTable(r) {
+  const w = r.lc, s = w.settings;
+  let h = '<tr><th>EXIT</th><th>TRADES · P/L</th></tr>';
+  Object.entries(w.exits).sort((a, b) => b[1].trades - a[1].trades).forEach(([k, v]) => {
+    h += '<tr><td>' + (REASON_NAME[k] || k) + '</td><td>' + fmtInt(v.trades) + ' · <span class="' + signCls(v.pl) + '">' + money(v.pl) + '</span></td></tr>';
+  });
+  h += '<tr><th>KAAM</th><th>GINTI</th></tr>' +
+    '<tr><td>Trades khule</td><td>' + fmtInt(w.opened) + ' (' + fmtNum(w.tradesPerDay, 1) + ' / din)</td></tr>' +
+    '<tr><td>Trade win rate</td><td>' + fmtNum(w.tradeWin, 1) + '%</td></tr>' +
+    '<tr><td>AVG groups bane</td><td>' + fmtInt(w.groups) + ' (max ' + w.maxGroup + ' trade)</td></tr>' +
+    '<tr><td>Max khuli (BUY / SELL)</td><td>' + w.maxOpen + ' (' + w.maxBuy + ' / ' + w.maxSell + ')</td></tr>';
+  h += '<tr><th>SKIP (candle)</th><th>GINTI</th></tr>';
+  [['max', 'Max trades bhare'], ['side', 'Side max bhari'], ['doji', 'Doji'], ['spread', 'Spread zyada'], ['weekend', 'Friday / weekend'], ['day', 'Din band (target/loss)']].forEach(([k, n]) => { if (w.skips[k]) h += '<tr><td>' + n + '</td><td>' + fmtInt(w.skips[k]) + '</td></tr>'; });
+  h += '<tr><th>SETTING</th><th>VALUE</th></tr><tr><td>TP / AVG</td><td>$' + s.tpUsd + ' · ' + (s.avgAfter ? s.avgAfter + ' ke baad $' + s.avgTp : 'AVG band') + '</td></tr>' +
+    '<tr><td>Max / side</td><td>' + s.maxT + ' / ' + s.maxSide + '</td></tr><tr><td>Daily</td><td>+' + s.tgt + '% / −' + s.loss + '%</td></tr>';
+  return h;
+}
+
 function modTable(r) {
   const M = r.quad.modules, days = Math.max(1, r.days.length);
   let h = '<tr><th>EA</th><th>TRADES</th><th>/DIN</th><th>WIN%</th><th>P/L</th><th>CAP</th><th>SL</th></tr>';
@@ -2601,6 +2886,7 @@ function summarize(st) {
   if (isQuad(st)) return summarizeQuad(st);
   if (isSweep(st)) return summarizeSweep(st);
   if (isPyr(st)) return summarizePyr(st);
+  if (isLC(st)) return summarizeLC(st);
   const e = st.entry, g = st.grid, d = st.daily, b = st.basket, p = b.presets[b.preset];
   const lotTxt = st.lots.map(r => r.from + '–' + r.to + ' = ' + r.lot).join(', ');
   const L = [];
@@ -2666,6 +2952,7 @@ $('btnStep10f').onclick = () => loadQuad('step-basket-10-fixed.json');
 $('btnSweep').onclick = () => loadQuad('liquidity-sweep-qp.json');
 $('btnPyr').onclick = () => loadQuad('trend-pyramid.json');
 $('btnPyr10k').onclick = () => loadQuad('trend-pyramid-10k.json');
+$('btnLC').onclick = () => loadQuad('amc-last-candle.json');
 $('btnUploadJson').onclick = () => $('jsonIn').click();
 $('jsonIn').onchange = async () => {
   const f = $('jsonIn').files[0]; $('jsonIn').value = ''; if (!f) return;
@@ -2735,7 +3022,7 @@ function renderForm() {
   if (!st) { F.innerHTML = ''; return; }
   const pk = st.basket && st.basket.preset, P = pk && st.basket.presets ? st.basket.presets[pk] : null;
   let h = '';
-  (isQuad(st) ? QUAD_FORM_GROUPS : isSweep(st) ? SWEEP_FORM_GROUPS : isPyr(st) ? PYR_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
+  (isQuad(st) ? QUAD_FORM_GROUPS : isSweep(st) ? SWEEP_FORM_GROUPS : isPyr(st) ? PYR_FORM_GROUPS : isLC(st) ? LC_FORM_GROUPS : FORM_GROUPS).forEach(([title, fields]) => {
     if (title === 'LOTS') {
       const lots = (st.lots || []).slice().sort((a, b) => a.from - b.from);
       h += '<div class="fgrp"><div class="lbl">Lot table</div><div class="hint muted" style="font-size:11px">Basket mein trade number → lot</div>';
@@ -2822,8 +3109,8 @@ $('stForm').addEventListener('click', e => {
 
 /* ===================== RUN ===================== */
 const PATH_NAME = { auto: 'Auto (MT5)', olhc: 'O→L→H→C', ohlc: 'O→H→L→C', worst: 'Worst-case', qp: 'QP (M5 close)' };
-const REASON_NAME = { BE: 'Breakeven stop', TP2: 'TP2 (liquidity pool)', LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam', MAX_LOSS: 'Basket max loss', RECOVER: 'Grid recover', FLIP: 'Trend palta', FRIDAY: 'Friday close' };
-const REASON_SHORT = { BE: 'BE', TP2: 'TP2', LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END', MAX_LOSS: 'MAXL', RECOVER: 'RECOV', FLIP: 'FLIP', FRIDAY: 'FRI' };
+const REASON_NAME = { BE: 'Breakeven stop', TP2: 'TP2 (liquidity pool)', LOCK: 'GRID lock', CYCLE_TP: 'Cycle +$ TP', CYCLE_SL: 'Cycle SL', PEAK_STOP: 'Peak protection', CAP: 'EA loss cap', SL: 'SL', TP1: 'Pehla trade TP', BASKET_TP: 'Basket TP', BASKET_SL: 'Basket SL', TRAIL: 'Trailing', DAY_TARGET: 'Daily target', DAY_LOSS: 'Daily loss', END: 'Data khatam', MAX_LOSS: 'Basket max loss', RECOVER: 'Grid recover', FLIP: 'Trend palta', FRIDAY: 'Friday close', SINGLE_TP: 'Single TP ($)', AVG_TP: 'AVG group TP' };
+const REASON_SHORT = { BE: 'BE', TP2: 'TP2', LOCK: 'LOCK', CYCLE_TP: 'C-TP', CYCLE_SL: 'C-SL', PEAK_STOP: 'PEAK', CAP: 'CAP', SL: 'SL', TP1: 'TP1', BASKET_TP: 'B-TP', BASKET_SL: 'SL', TRAIL: 'TRAIL', DAY_TARGET: 'D-TGT', DAY_LOSS: 'D-LOSS', END: 'END', MAX_LOSS: 'MAXL', RECOVER: 'RECOV', FLIP: 'FLIP', FRIDAY: 'FRI', SINGLE_TP: 'S-TP', AVG_TP: 'AVG' };
 const RUN_KEYS = ['rBal', 'rPreset', 'rPath', 'rSpMode', 'rSpPts', 'rFrom', 'rTo'];
 const money = v => (v < 0 ? '−$' : '$') + fmtNum(Math.abs(v), 2);
 const istStr = sec => fmtSec(serverToIst(sec, S.offset));
@@ -2933,9 +3220,11 @@ function renderRun(r) {
   if (r.quad) stats.splice(4, 0, ['Trades / din', fmtNum(r.quad.tradesPerDay, 1), 'chaaro EA milake']);
   if (r.sweep) stats.splice(6, 2, ['Trades / din', fmtNum(r.sweep.tradesPerDay, 2), r.sweep.setups + ' setups, ' + r.sweep.taken + ' liye'], ['TP1 hit', fmtInt(r.sweep.tp1Hits), '50% band + BE']);
   if (r.pyr) stats.splice(5, 1, ['Trades / din', fmtNum(r.pyr.tradesPerDay, 1), 'pyramid adds + grid milake']);
-  $('rModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr);
-  $('rModCard').querySelector('.lbl').textContent = r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  if (r.lc) stats.splice(5, 1, ['Trades / din', fmtNum(r.lc.tradesPerDay, 1), 'trade win ' + fmtNum(r.lc.tradeWin, 1) + '% · AVG groups ' + r.lc.groups]);
+  $('rModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr && !r.lc);
+  $('rModCard').querySelector('.lbl').textContent = r.lc ? 'Exits + AVG (AMC Last Candle)' : r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
   if (r.pyr) $('rMods').innerHTML = pyrTable(r);
+  if (r.lc) $('rMods').innerHTML = lcTable(r);
   if (r.quad) $('rMods').innerHTML = modTable(r);
   if (r.sweep) $('rMods').innerHTML = sweepTable(r);
   $('rStats').innerHTML = stats.map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
@@ -3022,9 +3311,10 @@ function renderReport() {
   $('repTitle').textContent = r.strategyName + ' · Preset ' + r.opt.preset + ' · ' + PATH_NAME[r.opt.path];
   $('repNet').innerHTML = '<span class="' + (r.net >= 0 ? '' : 'badc') + '">' + money(r.net) + '</span> <span style="font-size:18px" class="muted">(' + pctS(r.netPct) + ')</span>';
   $('repMeta').textContent = fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' (server)\nbalance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset + (r.ranAt ? ' · run ' + istNow(r.ranAt) + ' IST' : '');
-  $('repModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr);
-  $('repModCard').querySelector('.lbl').textContent = r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
+  $('repModCard').classList.toggle('hide', !r.quad && !r.sweep && !r.pyr && !r.lc);
+  $('repModCard').querySelector('.lbl').textContent = r.lc ? 'Exits + AVG (AMC Last Candle)' : r.pyr ? 'Exits + adds (Trend Pyramid)' : r.sweep ? 'Guardian + exits (Liquidity Sweep)' : 'EA-wise P/L (QUAD)';
   if (r.pyr) $('repMods').innerHTML = pyrTable(r);
+  if (r.lc) $('repMods').innerHTML = lcTable(r);
   if (r.quad) $('repMods').innerHTML = modTable(r);
   if (r.sweep) $('repMods').innerHTML = sweepTable(r);
   $('repStats').innerHTML = repStatsList(r, rep, st).map(s => '<div class="stat"><div class="lbl">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="n">' + s[2] + '</div></div>').join('');
@@ -3185,11 +3475,12 @@ function buildHtmlReport(r, rep, st) {
     '<div class="big">' + money(r.net) + ' <span style="font-size:18px;color:#8f887a">(' + pctS(r.netPct) + ')</span></div>' +
     '<div class="m">' + fmtSec(r.from) + ' → ' + fmtSec(r.to) + ' server · balance ' + money(r.startBal) + ' · spread ' + r.opt.spread + ' · GMT+' + r.opt.offset +
     ' · generated ' + istNow(Date.now()) + ' IST</div>' +
-    '<p class="m">' + (r.pyr ? 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', CSV spread, exact level fills. Trailing tight ho (step $2–3) to M1 raasta result badal deta hai — Worst-case bhi dekho. Rules: docs/PYRAMID-RULES.md.' : r.sweep ? (r.sweep.exec === 'qp' ? 'Model: QUANT PILOT ka apna backtester — M5 close pe fill, spread 0, candle mein SL pehle. Rules: docs/SWEEP-RULES.md.' : 'Model: M5 signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste (' + PATH_NAME[r.opt.path] + ') pe SL/BE/TP1/TP2, trailing M5 close pe. Slippage/swap nahi. Rules: docs/SWEEP-RULES.md.') : 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.') + '</p>' +
+    '<p class="m">' + (r.lc ? 'Model: M1 OHLC bars, naye candle ke pehle M1 bar ke open pe entry, intrabar path ' + PATH_NAME[r.opt.path] + ', CSV spread, TP exact level pe. Swap / news nahi. Rules: docs/LASTCANDLE-RULES.md.' : r.pyr ? 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', CSV spread, exact level fills. Trailing tight ho (step $2–3) to M1 raasta result badal deta hai — Worst-case bhi dekho. Rules: docs/PYRAMID-RULES.md.' : r.sweep ? (r.sweep.exec === 'qp' ? 'Model: QUANT PILOT ka apna backtester — M5 close pe fill, spread 0, candle mein SL pehle. Rules: docs/SWEEP-RULES.md.' : 'Model: M5 signal → agle M1 bar ke open pe fill, CSV spread, M1 raaste (' + PATH_NAME[r.opt.path] + ') pe SL/BE/TP1/TP2, trailing M5 close pe. Slippage/swap nahi. Rules: docs/SWEEP-RULES.md.') : 'Model: M1 OHLC bars, intrabar path ' + PATH_NAME[r.opt.path] + ', spread only (no slippage, swap, margin). Rules: docs/ENGINE-RULES.md.') + '</p>' +
     '<h2>Summary</h2><div class="grid">' + stats + '</div>' +
     '<h2>Equity</h2><div class="box">' + svgLine(r.eqClose, 900, 220, '#d4af37', r.startBal) + '</div>' +
     '<h2>Drawdown %</h2><div class="box">' + svgLine(Array.from(ddSeries(r), v => -v), 900, 110, '#ff5d5d', 0, v => fmtNum(Math.abs(v), 1) + '%') + '</div>' +
     '<h2>Close reasons</h2><div>' + reasons + '</div>' +
+    (r.lc ? '<h2>Exits + AVG (AMC Last Candle)</h2><div class="box"><table>' + lcTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' : '') +
     (r.pyr ? '<h2>Exits + adds (Trend Pyramid)</h2><div class="box"><table>' + pyrTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' : '') +
     (r.sweep ? '<h2>Guardian + exits (Liquidity Sweep)</h2><div class="box"><table>' + sweepTable(r).replace(/class="good"/g, 'class="g"').replace(/class="badc"/g, 'class="r"') + '</table></div>' +
       '<h2>Sweep trades (level · confidence)</h2><div class="box">' + T(['OPEN IST', 'DIR', 'LEVEL', 'CONF', 'LOT', 'ENTRY', 'EXIT', 'P/L', 'REASON'],
