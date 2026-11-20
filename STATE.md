@@ -1,9 +1,11 @@
 # STATE — SAMU Backtest Lab
 
 ## Current version
-**v0.8.1** (branch `feature-v0.8.1`), 19 Nov 2026 — Trend Pyramid $10k (lot 0.03) strategy file
+**v0.9.0** (branch `feature-v0.9.0`), 20 Nov 2026 — AMC Last Candle engine + backtest
 
 ## EA
+**AMC Last Candle v1.00** — samusignal repo `vps-ea/AMC Last Candle v1.00.mq5` (PR #232). Lab engine `runLastCandle` same rules: `docs/LASTCANDLE-RULES.md`. Backtest: `research/amc-last-candle/REPORT.md` — EA default 8/8 symbol minus, **live ke laayak nahi**
+
 **Trend Pyramid Grid v1.00** (`ea/Trend Pyramid Grid v1.00.mq5`) — Trend Pyramid ka EA, $10k / 0.03 / COMBO_10, PAPER default. Rules + setup: `docs/PYRAMID-RULES.md` (EA section)
 
 **SAMU Universal EA v1.04** — Friday stop + news filter; VPS Helper se VPS pe (samusignal `vps-ea/`), strategy JSON bhi Helper v1.06 se (`vps-files/step-basket.json` = Step Basket $10 FINAL). Setup: `docs/EA-SETUP.md`
@@ -11,6 +13,7 @@
 ## Version history
 | Version | Date | Kya aaya |
 |---|---|---|
+| v0.9.0 | 20 Nov 2026 | **AMC Last Candle engine** (`runLastCandle`, schema `samu-strategy/5`): naye candle (M1…D1) ke open pe pichhli candle GREEN = BUY / RED = SELL / doji skip, har trade alag TP $, ek side ki `avg_after` single atki + naya trade = AVG group (common TP = avg price + $), max trades / side, daily % of balance (target pe close-all), spread, Friday 22:00 IST – Monday 03:30 IST stop, `pnl: base_usd` (USDJPY…). `strategies/amc-last-candle.json` (EA defaults, presets A / NOAVG / AVG5 / TP2, $10k). Strategy screen pe **AMC Last Candle** button + form, Run/Report pe Exits + AVG card. `docs/LASTCANDLE-RULES.md`, `tests/lastcandle.test.js` (23). **Backtest** (Exness M1, 14 Aug – 19 Nov, 8 symbol): EA default sab minus — EURUSD −$959, GBPUSD −$572, AUDUSD −$592, NZDUSD −$718, USDJPY −$459, USDCHF −$677, USDCAD −$478, XAUUSD −$6,084 (−61%). Forex pe 40 trades atak ke ~65% samay EA ruka rehta hai; daily target 85 din me 0–2 baar. Sabse kam bura NOAVG (USDJPY +$147). Report: `research/amc-last-candle/REPORT.md` |
 | EA TPG v1.00 | 19 Nov 2026 | **Trend Pyramid Grid v1.00.mq5**: Lab `runPyramid` ke same rules + order (daily target → loss → TP → max loss → recover → SL/trail → add → grid; new bar: Friday → flip → nayi basket turant). Inputs default = `trend-pyramid-10k.json` COMBO_10. PAPER default, restart-safe, broker SL (live), own P/L $10k, margin guard, magic 770400 (`TPG#`), news filter (USD High), trade/paper CSV, full-screen Gold Luxe dashboard. `tests/pyramid-ea.test.js` (30): inputs = JSON, rule order. Compile abhi VPS pe check karna hai (yahan MetaEditor nahi) |
 | v0.8.1 | 19 Nov 2026 | **Trend Pyramid $10k (0.03)**: Ankush ka account $10,000, lot **0.03** (Ankush ka faisla). `strategies/trend-pyramid-10k.json` = 0.01 file ka ×3 (TP $45, recover $9, max loss −$60, daily +$90 / −$120), default COMBO_10, balance $10k. Strategy screen pe **Trend Pyramid $10k (0.03)** button. Test: 10k net = 3 × base (31 tests). `bt.js` mein `STRAT` env |
 | v0.8.0 | 19 Nov 2026 | **Trend Pyramid engine** (`runPyramid`, schema `samu-strategy/4`): H1 EMA 50/200 trend ki side **turant entry** (koi wait nahi, basket band hote hi agle M1 bar pe nayi), profit side har step pe add (max 5), har add ke baad SL = last add − trail gap, pure mode pehla SL ATR(M15)×1.5, combo mode loss grid (ATR×1, max 2, recover +$3, max loss −$20), basket TP $15, daily +$30 / −$40 ($), trend flip close + reverse, Friday 20:45 close. `strategies/trend-pyramid.json` (7 presets: PURE_2/3/10, COMBO_2/3/8/10, default COMBO_10, balance $1000), Strategy screen pe **Trend Pyramid** button + form (preset ke step/trail/grid/TP), Run/Report pe Exits + adds card, HTML report. `docs/PYRAMID-RULES.md`, `tests/pyramid.test.js` (29), `research/trend-pyramid/` (bt.js + REPORT.md) |
@@ -48,6 +51,10 @@
 | `strategies/trend-pyramid.json` | Trend Pyramid strategy (schema `samu-strategy/4`), $1000 / 0.01 |
 | `strategies/trend-pyramid-10k.json` | Trend Pyramid, $10,000 / 0.03 (Ankush ka live setup) |
 | `docs/PYRAMID-RULES.md` | Trend Pyramid engine ke exact rules |
+| `strategies/amc-last-candle.json` | AMC Last Candle (schema `samu-strategy/5`), EA defaults, $10k |
+| `docs/LASTCANDLE-RULES.md` | AMC Last Candle engine rules (= EA) |
+| `tests/lastcandle.test.js` | AMC Last Candle tests (`node tests/lastcandle.test.js`) |
+| `research/amc-last-candle/` | Backtest script (bt.js), results.json, REPORT.md |
 | `tests/pyramid.test.js` | Trend Pyramid tests (`node tests/pyramid.test.js`) |
 | `research/trend-pyramid/` | Trend Pyramid backtest script + REPORT.md |
 | `tests/sweep.test.js` | Sweep engine tests (`node tests/sweep.test.js`) |

@@ -1,0 +1,47 @@
+{
+  "schema": "samu-strategy/5",
+  "name": "AMC Last Candle",
+  "version": "1.0.0",
+  "notes": "samusignal vps-ea 'AMC Last Candle v1.00' EA ke defaults. Pichhli band candle GREEN = BUY, RED = SELL, doji skip. Har trade alag TP $1. Ek side ki 10 single khuli + 11vi aaye to pehli 10 = AVG group (common TP = avg price + $1). Daily +1% / -5% of balance. Swap backtest me nahi.",
+  "symbol": "EURUSDm",
+  "contract_size": 100000,
+  "point": 0.00001,
+  "pnl": "quote_usd",
+  "server_gmt_offset_hours": 0,
+  "default_balance": 10000,
+  "lot": 0.01,
+  "last_candle": {
+    "tf": "M1",
+    "tp_usd": 1.0,
+    "avg_after": 10,
+    "avg_tp_usd": 1.0,
+    "min_body_points": 0
+  },
+  "limits": {
+    "max_trades": 40,
+    "max_per_side": 25
+  },
+  "basket": {
+    "preset": "A",
+    "presets": {
+      "A": { "label": "EA default (10 ke baad AVG $1)" },
+      "NOAVG": { "label": "AVG band (sirf $1 TP)", "avg_after": 0 },
+      "AVG5": { "label": "5 ke baad AVG", "avg_after": 5 },
+      "TP2": { "label": "TP $2, AVG $2", "tp_usd": 2.0, "avg_tp_usd": 2.0 }
+    }
+  },
+  "daily": {
+    "target_pct": 1.0,
+    "loss_pct": 5.0,
+    "target_close_all": true,
+    "base": "day_start_balance",
+    "reset_time": "07:00",
+    "tz": "IST"
+  },
+  "costs": { "commission_per_lot": 0, "swap": false },
+  "filters": {
+    "max_spread_points": 30,
+    "friday_stop": { "enabled": true, "time": "22:00", "monday_from": "03:30", "tz": "IST" },
+    "news": { "enabled": true, "before_min": 30, "after_min": 30 }
+  }
+}
