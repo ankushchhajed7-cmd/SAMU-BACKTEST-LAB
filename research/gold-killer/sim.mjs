@@ -29,6 +29,8 @@ const DEF = {
   fastMove: 0, fastMin: 15,  // 5) pause new levels if (high-low) over last fastMin minutes >= fastMove $
   reducerFrom: 0, reducerMin: 1.0, // 6) DD reducer from level N: close newest+oldest when sum >= reducerMin $
   eqStop: 0,         // 7) total floating <= -eqStop $ -> close all baskets
+  deep: null,        // 9) Step 1 (owner): basket gehri (>= fromLv) -> GK levels band; bounce STOP (D door, trail) se ek badi trade (lot),
+                     //    max 'max' bounce trades (gap 'bgap' $); side ka kul >= tp -> band; kul <= -hard -> band.
   rec: null,         // 8) Strategy 2 (recovery) eqStop ke baad: {lot, sl, trail, tStart, maxMin, pauseGK}
                      //    move ki disha me (jis side ki basket doobi uski ULTI) market trade, SL $sl, profit >= tStart par trail $trail,
                      //    band jab: loss wapas (target) / SL / maxMin minute.
@@ -38,7 +40,8 @@ const DEF = {
 export function run(M, cfg) {
   const C = Object.assign({}, DEF, cfg);
   const side = [mk(1), mk(-1)];
-  function mk(d) { return { d, pos: [], pend: null }; }
+  function mk(d) { return { d, pos: [], pend: null, deep: false, nb: 0 }; }
+  let deepCloses = 0, hardCloses = 0;
   let bal = C.balance, peakEq = C.balance, maxDD = 0, maxDDpct = 0, worstFloat = 0;
   const baskets = []; let eqStops = 0, reducerCloses = 0;
   const ist = t => ((Math.floor((t + C.offsetH * -3600 + 19800) / 60) % 1440) + 1440) % 1440;
@@ -50,7 +53,7 @@ export function run(M, cfg) {
   function closeSide(S, b, a, t, why) {
     const pl = sideProfit(S, b, a); bal += pl;
     baskets.push({ d: S.d, n: S.pos.length, lots: S.pos.reduce((x, p) => x + p.lot, 0), pl, t, why });
-    S.pos = []; S.pend = null;
+    S.pos = []; S.pend = null; S.deep = false; S.nb = 0;
   }
   let blown = null, worstT = 0; const blows = []; let pnl = 0;
   let R = null; const recs = [];
@@ -82,7 +85,26 @@ export function run(M, cfg) {
       for (const S of side) {
         if (R && C.rec.pauseGK && S.pos.length === 0) { S.pend = null; continue; }
         // basket TP
-        if (S.pos.length && sideProfit(S, b, a) >= C.tp) { closeSide(S, b, a, t, 'TP'); continue; }
+        if (S.pos.length && !S.deep && sideProfit(S, b, a) >= C.tp) { closeSide(S, b, a, t, 'TP'); continue; }
+        if (C.deep && S.pos.length) {
+          const P = C.deep, prof = sideProfit(S, b, a);
+          if (!S.deep && S.pos.length >= P.fromLv) { S.deep = true; S.pend = null; }
+          if (S.deep) {
+            if (prof >= P.tp) { closeSide(S, b, a, t, 'DEEP_TP'); deepCloses++; continue; }
+            if (P.hard && prof <= -P.hard) { closeSide(S, b, a, t, 'HARD'); hardCloses++; continue; }
+            if (S.nb >= P.max) continue;
+            const want = S.d > 0 ? a + P.D : b - P.D;
+            const ext = S.d > 0 ? Math.min(...S.pos.map(p => p.e)) : Math.max(...S.pos.map(p => p.e));
+            const ok = w => S.d > 0 ? w <= ext - P.bgap : w >= ext + P.bgap;
+            if (!S.pend) { if (ok(want)) S.pend = { px: want, k: -1 }; }
+            else if ((S.d > 0 ? want <= S.pend.px - C.step : want >= S.pend.px + C.step) && ok(want)) S.pend.px = want;
+            if (S.pend && (S.d > 0 ? a >= S.pend.px : b <= S.pend.px)) {
+              const e = S.d > 0 ? Math.max(a, S.pend.px) + C.slip : Math.min(b, S.pend.px) - C.slip;
+              S.pos.push({ s: S.d, e, lot: P.lot }); S.pend = null; S.nb++;
+            }
+            continue;
+          }
+        }
         // DD reducer
         if (C.reducerFrom && S.pos.length >= C.reducerFrom) {
           const newest = S.pos[S.pos.length - 1], oldest = S.pos[0];
@@ -129,7 +151,7 @@ export function run(M, cfg) {
   const last = M.n - 1, b = M.c[last], a = b + (M.s[last] || 0.2);
   const openPL = side.reduce((x, S) => x + sideProfit(S, b, a), 0);
   pnl += bal - C.balance;
-  return { bal, openPL, pnl, blows, recs, maxDD, maxDDpct, worstFloat, worstT, blown, baskets, eqStops, reducerCloses };
+  return { bal, openPL, pnl, blows, recs, deepCloses, hardCloses, maxDD, maxDDpct, worstFloat, worstT, blown, baskets, eqStops, reducerCloses };
 }
 
 export function summary(r, C, M) {
@@ -141,7 +163,7 @@ export function summary(r, C, M) {
     net: +(r.pnl + r.openPL).toFixed(0), blowups: r.blows.length, blowDates: r.blows.map(x => new Date(x * 1000).toISOString().slice(5, 10)), maxDD: +r.maxDD.toFixed(0), maxDDpct: +r.maxDDpct.toFixed(1), worstFloat: +r.worstFloat.toFixed(0),
     baskets: r.baskets.length, perDay: +(r.baskets.length / days).toFixed(1), maxLevel: Math.max(0, ...r.baskets.map(x => x.n)), maxLots: +Math.max(0, ...r.baskets.map(x => x.lots)).toFixed(2),
     blown: r.blown ? new Date(r.blown * 1000).toISOString().slice(0, 16) : null, worstAt: r.worstT ? new Date(r.worstT * 1000).toISOString().slice(0, 16) : null,
-    eqStops: r.eqStops, reducer: r.reducerCloses, recN: (r.recs||[]).length, recNet: +((r.recs||[]).reduce((x, y) => x + y.pl, 0)).toFixed(0), recWin: (r.recs||[]).filter(x => x.pl > 0).length, worstBasket: +Math.min(0, ...r.baskets.map(x => x.pl)).toFixed(0),
+    eqStops: r.eqStops, reducer: r.reducerCloses, deepTP: r.deepCloses, hard: r.hardCloses, recN: (r.recs||[]).length, recNet: +((r.recs||[]).reduce((x, y) => x + y.pl, 0)).toFixed(0), recWin: (r.recs||[]).filter(x => x.pl > 0).length, worstBasket: +Math.min(0, ...r.baskets.map(x => x.pl)).toFixed(0),
     months: Object.fromEntries(Object.entries(months).map(([k, v]) => [k, +v.toFixed(0)]))
   };
 }

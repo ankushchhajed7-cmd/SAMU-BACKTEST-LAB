@@ -41,3 +41,19 @@ Chalao: `node sim.mjs XAUUSDm_M1.csv.gz '[{"label":"x","restart":true,"mult":1.2
 | 0.50 lot, SL $8 | **ulta (bounce)** | S2 **+$2,292** (24/35) | +$7,783 | +$5,720 |
 
 Nateeja: move ke saath wali recovery har path par minus. Bounce wali recovery plus hai (60–85 % jeet), par stop ka sirf ~5–15 % wapas laati hai — 101 din me 35–77 stop × $1,000 ke saamne chhoti. Kul natija phir bhi minus. Asli dikkat: basket bahut baar −$1,000 tak jaati hai.
+
+## 25 Nov — Step 1: gehri basket me "bounce" trade (stop ki jagah)
+`deep` option: basket `fromLv` level tak pahunche → GK ke naye level band; BUY basket ke liye BUY STOP (price se D door, peeche chalta) se ek badi trade (`lot`), max 2, pichhle se `bgap` $2 door; side ka kul ≥ `tp` → band; kul ≤ −`hard` → band.
+48 setting × 3 path (auto / O→L→H→C / O→H→L→C). Top (sabse bura path sabse achha):
+
+| Setting | Net (3 path) | Account khatam | Max DD % | Hard stop |
+|---|---|---|---|---|
+| v1.04 abhi (tulna) | −$18,086 / −$10,261* / −$10,169* | 2 / 1 / 1 | 100+ | – |
+| **L8, lot 0.2, D $2, tp $15, hard $4k** | **+$5,096 / +$2,437 / +$10,695** | **0** | 46 / 90 / 50 | 5 / 7 / 5 |
+| L6, lot 0.2, D $1, tp $5, hard $4k | +$13,959 / +$2,217 / +$4,508 | 0 | 33 / 59 / 85 | 2 / 6 / 5 |
+| L6, lot 0.2, D $1, tp $15, hard $4k | +$12,292 / −$2,778 / −$3,567 | 0 | 39 / 77 / 79 | 3 / 8 / 8 |
+| bounce lot 0.5 wale | zyadatar minus | 2–7 | ~100 | 7–11 |
+| hard $2k wale | minus | 3+ | ~100 | 13–18 |
+(*pehle bina restart wale run.)
+
+Nateeja: chhoti bounce trade (0.2) + hard $4k se 3 path par account khatam nahi hua aur net plus — v1.04 se behtar. Par DD abhi bhi bada (hard stop $4k 5–7 baar / 101 din) aur 48 me se sabse achha chuna gaya hai (overfit ka khatra). Tick data aur demo par aage jaanch zaroori.
