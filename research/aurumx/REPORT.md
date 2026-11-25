@@ -29,3 +29,19 @@ Clone AurumX ki trade ginti/time/disha pakadta hai, par win % ~10 point kam (asl
 Ek trade ki kamai sirf ~$0.17 hai. Demo par fill turant aur bina slippage — isliye munafa. Real account par $0.10 ka slippage/side hi poora munafa kha jaata hai. **Real par chalane layak nahi**, jab tak real account (0.01 lot, 1–2 din) par khud na dikhe.
 
 Chalao: `node clone.mjs <ticksDir> <history.json> '[{"label":"x","D":0.6,"TS":0.4,"TD":0.4,"upd":3,"fast":3,"full":1,"slipIn":0.05,"slipOut":0.05}]'`
+
+## 25 Nov — disha (trend) badalne se kya hota hai? (Exness demo par 10 SELL lagatar loss ke baad)
+Vantage ticks, 24 h. A = Vantage spread $0.11, bina slippage. B = Exness jaisa spread (+$0.14 → ~$0.25) + slippage $0.05/side.
+
+| Disha ka niyam | A net | B net |
+|---|---|---|
+| EMA100 M1 (abhi) | +$248 | −$809 |
+| EMA50 M1 | +$254 | −$795 |
+| EMA20 M1 | +$259 | −$801 |
+| EMA21 M5 | +$242 | −$804 |
+| EMA21 M15 | +$253 | −$798 |
+| EMA100 + 2 loss par 15 min ulti disha | +$282 | −$757 |
+| EMA21 M5 + 2 loss flip | +$286 | −$749 |
+
+Nateeja: indicator / disha badalne se farq sirf ~$30–60 ka; asli farq **spread + slippage** ka hai. Exness (spread ~$0.25) par har trade shuru se hi ~$0.25 neeche — win % 48 → 30. Yeh strategy sirf ~$0.11 spread wale account par hi soch sakte hain.
+Clone params naye: `xSpread`, `flipAfter`, `flipMin`.
