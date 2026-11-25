@@ -28,19 +28,21 @@ export function realTrades(file) {
   }
   return tr;
 }
-const DEF = { D: 0.5, SL: 0.5, TS: 0.3, TD: 0.3, ema: 100, tf: 1, slipIn: 0, slipOut: 0, wait: 0, upd: 0, fast: 0, comm: 0, lot: 0.01, from: 0, to: 9e15, label: '' };
+const DEF = { D: 0.5, SL: 0.5, TS: 0.3, TD: 0.3, ema: 100, tf: 1, slipIn: 0, slipOut: 0, wait: 0, upd: 0, fast: 0, xSpread: 0, flipAfter: 0, flipMin: 15, comm: 0, lot: 0.01, from: 0, to: 9e15, label: '' };
 export function run(X, cfgIn) {
   const C = Object.assign({}, DEF, cfgIn); const k = 2 / (C.ema + 1); const tfMs = C.tf * 60000;
   let barId = -1, lastClose = null, ema = null, sigClose = null, sigEma = null;
   let side = 0, pend = null, pos = null, lastCt = -1e18; const trades = [];
+  let lossRun = 0, lossSide = 0, flipSide = 0, flipUntil = 0;
   const val = 100 * C.lot; // $ per $1 move (gold contract 100)
   for (let i = 0; i < X.n; i++) {
-    const t = X.T[i], b = X.B[i], a = X.A[i];
+    const t = X.T[i], b = X.B[i], a = X.A[i] + C.xSpread;
     const id = Math.floor(t / tfMs);
     if (id !== barId) { if (lastClose !== null) { ema = ema === null ? lastClose : ema + k * (lastClose - ema); sigClose = lastClose; sigEma = ema; } barId = id; }
     lastClose = b;
     if (t < C.from || t > C.to || sigEma === null) continue;
-    const want = sigClose > sigEma ? 1 : -1;
+    let want = sigClose > sigEma ? 1 : -1;
+    if (flipSide && t < flipUntil) want = flipSide; else flipSide = 0;
     if (pos) {
       const s = pos.s;
       if (s > 0) { if (b > pos.best) pos.best = b; if (pos.best - pos.e >= C.TS) pos.sl = Math.max(pos.sl, pos.best - C.TD); if (b <= pos.sl) close(pos.sl - C.slipOut, t); }
@@ -57,7 +59,10 @@ export function run(X, cfgIn) {
       if (b <= pend.px && C.fast && t - pend.et > C.fast * 1000) { pend.px = a - C.D; pend.et = t; }
       else if (b <= pend.px) { const e = Math.min(b, pend.px) - C.slipIn; pos = { s: -1, e, sl: e + C.SL, best: a, ot: t }; pend = null; } }
   }
-  function close(px, t) { const pl = (px - pos.e) * pos.s * val - C.comm; trades.push({ s: pos.s, ot: pos.ot, ct: t, e: pos.e, x: px, pl }); pos = null; lastCt = t; }
+  function close(px, t) { const pl = (px - pos.e) * pos.s * val - C.comm; trades.push({ s: pos.s, ot: pos.ot, ct: t, e: pos.e, x: px, pl });
+    if (pl < 0) { if (lossSide === pos.s) lossRun++; else { lossSide = pos.s; lossRun = 1; } } else { lossRun = 0; lossSide = 0; }
+    if (C.flipAfter && lossRun >= C.flipAfter) { flipSide = -pos.s; flipUntil = t + C.flipMin * 60000; lossRun = 0; lossSide = 0; }
+    pos = null; lastCt = t; }
   return trades;
 }
 export function stats(tr, hours) {
