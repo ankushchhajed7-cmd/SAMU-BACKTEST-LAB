@@ -29,6 +29,8 @@ const DEF = {
   fastMove: 0, fastMin: 15,  // 5) pause new levels if (high-low) over last fastMin minutes >= fastMove $
   reducerFrom: 0, reducerMin: 1.0, // 6) DD reducer from level N: close newest+oldest when sum >= reducerMin $
   eqStop: 0,         // 7) total floating <= -eqStop $ -> close all baskets
+  outLvCap: 0,       // 10) session ke bahar khuli basket max itne level tak hi (0 = off)
+  startRange: 0, startMin: 30, // 11) nayi basket tabhi jab pichhle startMin minute ka range < startRange $
   deep: null,        // 9) Step 1 (owner): basket gehri (>= fromLv) -> GK levels band; bounce STOP (D door, trail) se ek badi trade (lot),
                      //    max 'max' bounce trades (gap 'bgap' $); side ka kul >= tp -> band; kul <= -hard -> band.
   rec: null,         // 8) Strategy 2 (recovery) eqStop ke baad: {lot, sl, trail, tStart, maxMin, pauseGK}
@@ -68,7 +70,10 @@ export function run(M, cfg) {
     }
     const bull = c >= o;
     const path = C.path === 'ohlc' ? [o, h, l, c] : C.path === 'olhc' ? [o, l, h, c] : bull ? [o, l, h, c] : [o, h, l, c];
-    const allow0 = !C.useTime || inSess(ist(t));
+    const inS = !C.useTime || inSess(ist(t));
+    let calm = true;
+    if (C.startRange) { let hi = -1e9, lo = 1e9; for (let j = Math.max(0, i - C.startMin); j < i; j++) { if (M.h[j] > hi) hi = M.h[j]; if (M.l[j] < lo) lo = M.l[j]; } calm = hi - lo < C.startRange; }
+    const allow0 = inS && calm;
     for (const b of path) {
       const a = b + sp;
       if (R) {
@@ -112,7 +117,7 @@ export function run(M, cfg) {
         }
         // pending handling
         const k = S.pos.length + 1;
-        const blocked = (C.maxLv && S.pos.length >= C.maxLv) || (S.pos.length === 0 && !allow0) || (fast && S.pos.length > 0);
+        const blocked = (C.maxLv && S.pos.length >= C.maxLv) || (S.pos.length === 0 && !allow0) || (fast && S.pos.length > 0) || (C.outLvCap && !inS && S.pos.length >= C.outLvCap);
         if (blocked) { S.pend = null; continue; }
         const want = S.d > 0 ? a + C.D : b - C.D;
         const ext = S.pos.length ? (S.d > 0 ? Math.min(...S.pos.map(p => p.e)) : Math.max(...S.pos.map(p => p.e))) : null;
