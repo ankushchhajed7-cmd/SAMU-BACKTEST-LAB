@@ -57,3 +57,16 @@ Nateeja: move ke saath wali recovery har path par minus. Bounce wali recovery pl
 (*pehle bina restart wale run.)
 
 Nateeja: chhoti bounce trade (0.2) + hard $4k se 3 path par account khatam nahi hua aur net plus — v1.04 se behtar. Par DD abhi bhi bada (hard stop $4k 5–7 baar / 101 din) aur 48 me se sabse achha chuna gaya hai (overfit ka khatra). Tick data aur demo par aage jaanch zaroori.
+
+## 25 Nov — time + news ke alawa aur "care"
+Time filter sirf NAYI basket rokta hai; khuli basket bahar bhi level jodti hai. 11 Aug wali basket 09:00 IST (session) me shuru hui, gold 11:20 IST tak $50 gira. 4 Nov: din ka range $152.
+| Niyam | Net (3 path) | Khatam | DD % | Baskets (101 din) |
+|---|---|---|---|---|
+| v1.04 abhi | −$18,086 / −$57,967 / +$23,623 | 2/8/2 | 100+ | 626 |
+| A) session ke bahar max 8 level | +$1,367 / −$45,216 / −$38,379 | 2/7/5 | 62–115 | 610 |
+| **B) nayi basket tabhi jab pichhle 30 min ka range < $5** | **+$9,715 / +$18,173 / +$12,022** | **0/0/0** | 36–62 | 136 |
+| B range < $4 | +$5,082 / +$8,632 / +$3,875 | 0/0/0 | 27–96 | 48 |
+| B range < $6 | +$16,469 / +$184 / +$20,926 | 0/1/0 | 49–102 | 234 |
+| B range < $7 / $8 | ek path par −$31k / −$67k | 4 / 6 | 100+ | 329 / 396 |
+| B $6 + deep bounce | +$9,933 / −$726 / +$6,366 | 0/0/0 | 25–59 | 234 |
+`startRange`, `startMin`, `outLvCap` options in sim.mjs. B $5: har mahina plus (auto path). DD ab bhi 36–62 % — basket shuru hone ke baad ka bada move abhi bhi khatra.
