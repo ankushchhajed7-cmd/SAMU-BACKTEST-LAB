@@ -70,3 +70,16 @@ Time filter sirf NAYI basket rokta hai; khuli basket bahar bhi level jodti hai. 
 | B range < $7 / $8 | ek path par −$31k / −$67k | 4 / 6 | 100+ | 329 / 396 |
 | B $6 + deep bounce | +$9,933 / −$726 / +$6,366 | 0/0/0 | 25–59 | 234 |
 `startRange`, `startMin`, `outLvCap` options in sim.mjs. B $5: har mahina plus (auto path). DD ab bhi 36–62 % — basket shuru hone ke baad ka bada move abhi bhi khatra.
+
+## 25 Nov — Owner idea: manual START + max 2 TP + session khatam par profit close
+Options in sim.mjs: `armCalm/armMin` (session shuru par ek baar calm check = owner ka START), `maxCyc` (ek START ke baad max TP), `endClose` (session ke baad basket profit >= $X ho to band). Scripts: manual.mjs, manual2.mjs.
+Session shuru par pichhle 60 min ka gold range: p10 $8.7, median $15.5 — "$5 se kam" kabhi nahi mila.
+| Niyam | Net (3 path) | Khatam | DD % | Baskets |
+|---|---|---|---|---|
+| v1.04 abhi | −$18.1k / −$58.0k / +$23.6k | 2/8/2 | 100+ | 626 |
+| max 2 TP + session khatam profit close | +$17.8k / −$61.4k / +$11.8k | 0/6/1 | 41–107 | 428 |
+| + START tabhi jab 60m range < $12 | +$5.2k / −$41.9k / +$7.0k | 0/4/0 | 66–103 | 133 |
+| 30m < $5 lagatar check (B) | +$9.7k / +$18.2k / +$12.0k | 0/0/0 | 36–62 | 136 |
+| B + 2 TP + profit close | +$6.0k / +$11.5k / +$6.7k | 0/0/0 | 46–76 | 137 |
+| **B + 2 TP + profit close + deep bounce** | **+$2.7k / +$3.6k / +$3.3k** | **0/0/0** | **15–35** | 138 |
+Seekh: START ke waqt ka ek baar ka check aage ka move nahi batata (11 Aug, 12 Oct, 11/16 Nov wale START shant dikhe the). Session-end close sirf profit wali basket band karta hai; account ko maarne wali basket loss me hoti hai. Bachav: lagatar calm check + gehri basket ka alag niyam (deep bounce / hard loss).
