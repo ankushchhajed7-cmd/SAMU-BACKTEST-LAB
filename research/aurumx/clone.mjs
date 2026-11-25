@@ -28,7 +28,7 @@ export function realTrades(file) {
   }
   return tr;
 }
-const DEF = { D: 0.5, SL: 0.5, TS: 0.3, TD: 0.3, ema: 100, tf: 1, slipIn: 0, slipOut: 0, wait: 0, upd: 0, fast: 0, xSpread: 0, flipAfter: 0, flipMin: 15, comm: 0, lot: 0.01, from: 0, to: 9e15, label: '' };
+const DEF = { D: 0.5, SL: 0.5, TS: 0.3, TD: 0.3, ema: 100, tf: 1, slipIn: 0, slipOut: 0, wait: 0, upd: 0, fast: 0, xSpread: 0, flipAfter: 0, flipMin: 15, forceSide: 0, comm: 0, lot: 0.01, from: 0, to: 9e15, label: '' };
 export function run(X, cfgIn) {
   const C = Object.assign({}, DEF, cfgIn); const k = 2 / (C.ema + 1); const tfMs = C.tf * 60000;
   let barId = -1, lastClose = null, ema = null, sigClose = null, sigEma = null;
@@ -43,6 +43,7 @@ export function run(X, cfgIn) {
     if (t < C.from || t > C.to || sigEma === null) continue;
     let want = sigClose > sigEma ? 1 : -1;
     if (flipSide && t < flipUntil) want = flipSide; else flipSide = 0;
+    if (C.forceSide) want = C.forceSide;
     if (pos) {
       const s = pos.s;
       if (s > 0) { if (b > pos.best) pos.best = b; if (pos.best - pos.e >= C.TS) pos.sl = Math.max(pos.sl, pos.best - C.TD); if (b <= pos.sl) close(pos.sl - C.slipOut, t); }
@@ -81,4 +82,24 @@ if (import.meta.url === 'file://' + process.argv[1]) {
   console.log('REAL AurumX', JSON.stringify(stats(real, hrs)));
   const V = JSON.parse(process.argv[4] || '[{"label":"clone default"}]');
   for (const v of V) { const win = v.full ? {} : { from, to }; const tr = run(X, Object.assign({}, win, v)); const h = v.full ? (X.T[X.n - 1] - X.T[0]) / 3600000 : hrs; console.log(v.label.padEnd(28), JSON.stringify(stats(tr, h))); }
+}
+
+// v0.9.3: "duplicate" idea — BUY aur SELL dono virtual (paper) chalte; asli trade sirf us side ki
+// jiski pichhli K virtual trades ka jod > 0 (aur doosri se behtar). K virtual = rule ke hisaab se chuni trades.
+export function runDuplicate(X, cfg, K = 5, mode = 'best') {
+  const vb = run(X, { ...cfg, forceSide: 1 }), vs = run(X, { ...cfg, forceSide: -1 });
+  const all = vb.map(t => ({ ...t })).concat(vs.map(t => ({ ...t }))).sort((a, b) => a.ot - b.ot);
+  const done = { 1: [], '-1': [] }; // closed virtual trades per side (by close time)
+  const closedBy = (side, t) => (side > 0 ? vb : vs).filter(x => x.ct <= t).slice(-K);
+  const real = []; let busyUntil = -1;
+  for (const tr of all) {
+    if (tr.ot < busyUntil) continue;
+    const mine = closedBy(tr.s, tr.ot), other = closedBy(-tr.s, tr.ot);
+    if (mine.length < K) continue;
+    const sm = mine.reduce((a, x) => a + x.pl, 0), so = other.reduce((a, x) => a + x.pl, 0);
+    const ok = mode === 'best' ? (sm > 0 && sm >= so) : sm > 0;
+    if (!ok) continue;
+    real.push(tr); busyUntil = tr.ct;
+  }
+  return real;
 }

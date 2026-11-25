@@ -45,3 +45,18 @@ Vantage ticks, 24 h. A = Vantage spread $0.11, bina slippage. B = Exness jaisa s
 
 Nateeja: indicator / disha badalne se farq sirf ~$30–60 ka; asli farq **spread + slippage** ka hai. Exness (spread ~$0.25) par har trade shuru se hi ~$0.25 neeche — win % 48 → 30. Yeh strategy sirf ~$0.11 spread wale account par hi soch sakte hain.
 Clone params naye: `xSpread`, `flipAfter`, `flipMin`.
+
+## 25 Nov — "duplicate" idea: BUY STOP + SELL STOP dono virtual, jo plus dikhe wahi asli
+`runDuplicate(X, cfg, K, mode)`: BUY-only aur SELL-only dono virtual chalte; asli trade sirf us side ki jiski pichhli K virtual trades ka jod > 0 (`best` = doosri side se bhi behtar).
+
+| Niyam | A: Vantage spread | B: Exness jaisa ($0.25) + slip $0.05 |
+|---|---|---|
+| Abhi (EMA100) | +$248 | −$809 |
+| Hamesha sirf BUY | +$277 | −$782 |
+| Hamesha sirf SELL | +$280 | −$784 |
+| Duplicate K=3 best | +$256 | −$313 |
+| Duplicate K=10 best | +$206 | −$246 |
+| Duplicate K=20 best | +$195 | −$184 |
+| Virtual +$0.10…0.30 dikhe tab asli | — | −$667 … −$506 |
+
+Nateeja: sirf-BUY aur sirf-SELL dono barabar kamaate hain → is strategy me disha ka edge hai hi nahi, kamai spread/fill se hai. Duplicate filter trades kam karke nuksan chhota karta hai, par win % ~30 hi rehta hai; Exness kharche par har variant minus.
