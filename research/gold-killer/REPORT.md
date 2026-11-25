@@ -27,3 +27,17 @@ Gold Killer ki kamai "seedhe bade move" ka risk lekar aati hai. 101 din me aise 
 Pakka natija: 1546 terminal par Watcher v1.11 tick record 2 hafte → tick simulator.
 
 Chalao: `node sim.mjs XAUUSDm_M1.csv.gz '[{"label":"x","restart":true,"mult":1.2,"maxLv":14,"eqStop":1000,"path":"auto"}]'`
+
+## 25 Nov — "Strategy 2": $1,000 DD par basket band, phir recovery trade (owner idea)
+`rec` option: equity stop ke baad ek market trade (GK nayi basket ruki rehti), SL $sl, profit $tStart par trail $trail, band: loss wapas / SL / maxMin.
+
+| Strategy 2 | Disha | Path auto | O→L→H→C | O→H→L→C |
+|---|---|---|---|---|
+| sirf stop (koi S2 nahi) | – | −$12,656 (35 stop) | −$46,970 | −$47,103 |
+| 0.30 lot, SL $5 | move ke saath | S2 −$1,280 | −$4,579 | −$3,370 |
+| 0.50 lot, SL $8 | move ke saath | S2 −$2,946 | −$8,747 | −$3,754 |
+| 1.00 lot, SL $3 | move ke saath | S2 −$5,070 | −$12,661 | −$11,780 |
+| 0.30 lot, SL $5 | **ulta (bounce)** | S2 **+$1,339** (30/35 jeet) | +$1,860 | +$3,289 |
+| 0.50 lot, SL $8 | **ulta (bounce)** | S2 **+$2,292** (24/35) | +$7,783 | +$5,720 |
+
+Nateeja: move ke saath wali recovery har path par minus. Bounce wali recovery plus hai (60–85 % jeet), par stop ka sirf ~5–15 % wapas laati hai — 101 din me 35–77 stop × $1,000 ke saamne chhoti. Kul natija phir bhi minus. Asli dikkat: basket bahut baar −$1,000 tak jaati hai.
