@@ -29,6 +29,9 @@ const DEF = {
   fastMove: 0, fastMin: 15,  // 5) pause new levels if (high-low) over last fastMin minutes >= fastMove $
   reducerFrom: 0, reducerMin: 1.0, // 6) DD reducer from level N: close newest+oldest when sum >= reducerMin $
   eqStop: 0,         // 7) total floating <= -eqStop $ -> close all baskets
+  rec: null,         // 8) Strategy 2 (recovery) eqStop ke baad: {lot, sl, trail, tStart, maxMin, pauseGK}
+                     //    move ki disha me (jis side ki basket doobi uski ULTI) market trade, SL $sl, profit >= tStart par trail $trail,
+                     //    band jab: loss wapas (target) / SL / maxMin minute.
   label: ''
 };
 
@@ -50,6 +53,7 @@ export function run(M, cfg) {
     S.pos = []; S.pend = null;
   }
   let blown = null, worstT = 0; const blows = []; let pnl = 0;
+  let R = null; const recs = [];
   const hiQ = [], loQ = []; // for fastMove window (bar index deque by value)
   for (let i = 0; i < M.n && !blown; i++) {
     const t = M.t[i], sp = M.s[i] || 0.2, o = M.o[i], h = M.h[i], l = M.l[i], c = M.c[i];
@@ -64,7 +68,19 @@ export function run(M, cfg) {
     const allow0 = !C.useTime || inSess(ist(t));
     for (const b of path) {
       const a = b + sp;
+      if (R) {
+        const cur = R.d > 0 ? b : a, pl = (cur - R.e) * R.d * R.lot * 100;
+        if ((cur - R.e) * R.d > R.best) R.best = (cur - R.e) * R.d;
+        if (R.best >= C.rec.tStart) R.sl = Math.max(R.sl, R.best - C.rec.trail);
+        const hitSL = (cur - R.e) * R.d <= R.sl;
+        const done = pl >= R.target, timeout = C.rec.maxMin && t - R.t0 >= C.rec.maxMin * 60;
+        if (hitSL || done || timeout) {
+          const ex = hitSL ? R.e + R.d * R.sl : cur; const fpl = (ex - R.e) * R.d * R.lot * 100;
+          bal += fpl; recs.push({ pl: fpl, why: hitSL ? 'SL' : done ? 'TARGET' : 'TIME', t }); R = null;
+        }
+      }
       for (const S of side) {
+        if (R && C.rec.pauseGK && S.pos.length === 0) { S.pend = null; continue; }
         // basket TP
         if (S.pos.length && sideProfit(S, b, a) >= C.tp) { closeSide(S, b, a, t, 'TP'); continue; }
         // DD reducer
@@ -94,7 +110,11 @@ export function run(M, cfg) {
       // equity
       const fl = side.reduce((x, S) => x + sideProfit(S, b, a), 0);
       if (fl < worstFloat) { worstFloat = fl; worstT = t; }
-      if (C.eqStop && fl <= -C.eqStop) { for (const S of side) if (S.pos.length) closeSide(S, b, a, t, 'EQSTOP'); eqStops++; }
+      if (C.eqStop && fl <= -C.eqStop) {
+        const loser = side.map(S => ({ d: S.d, p: sideProfit(S, b, a) })).sort((x, y) => x.p - y.p)[0];
+        for (const S of side) if (S.pos.length) closeSide(S, b, a, t, 'EQSTOP'); eqStops++;
+        if (C.rec && !R) { const d = C.rec.revert ? loser.d : -loser.d; const e = d > 0 ? a : b; R = { d, e, lot: C.rec.lot, sl: -C.rec.sl, best: 0, target: -fl, t0: t }; }
+      }
       const eq = bal + side.reduce((x, S) => x + sideProfit(S, b, a), 0);
       if (eq > peakEq) peakEq = eq;
       const dd = peakEq - eq; if (dd > maxDD) { maxDD = dd; maxDDpct = dd / peakEq * 100; }
@@ -109,7 +129,7 @@ export function run(M, cfg) {
   const last = M.n - 1, b = M.c[last], a = b + (M.s[last] || 0.2);
   const openPL = side.reduce((x, S) => x + sideProfit(S, b, a), 0);
   pnl += bal - C.balance;
-  return { bal, openPL, pnl, blows, maxDD, maxDDpct, worstFloat, worstT, blown, baskets, eqStops, reducerCloses };
+  return { bal, openPL, pnl, blows, recs, maxDD, maxDDpct, worstFloat, worstT, blown, baskets, eqStops, reducerCloses };
 }
 
 export function summary(r, C, M) {
@@ -121,7 +141,7 @@ export function summary(r, C, M) {
     net: +(r.pnl + r.openPL).toFixed(0), blowups: r.blows.length, blowDates: r.blows.map(x => new Date(x * 1000).toISOString().slice(5, 10)), maxDD: +r.maxDD.toFixed(0), maxDDpct: +r.maxDDpct.toFixed(1), worstFloat: +r.worstFloat.toFixed(0),
     baskets: r.baskets.length, perDay: +(r.baskets.length / days).toFixed(1), maxLevel: Math.max(0, ...r.baskets.map(x => x.n)), maxLots: +Math.max(0, ...r.baskets.map(x => x.lots)).toFixed(2),
     blown: r.blown ? new Date(r.blown * 1000).toISOString().slice(0, 16) : null, worstAt: r.worstT ? new Date(r.worstT * 1000).toISOString().slice(0, 16) : null,
-    eqStops: r.eqStops, reducer: r.reducerCloses, worstBasket: +Math.min(0, ...r.baskets.map(x => x.pl)).toFixed(0),
+    eqStops: r.eqStops, reducer: r.reducerCloses, recN: (r.recs||[]).length, recNet: +((r.recs||[]).reduce((x, y) => x + y.pl, 0)).toFixed(0), recWin: (r.recs||[]).filter(x => x.pl > 0).length, worstBasket: +Math.min(0, ...r.baskets.map(x => x.pl)).toFixed(0),
     months: Object.fromEntries(Object.entries(months).map(([k, v]) => [k, +v.toFixed(0)]))
   };
 }
